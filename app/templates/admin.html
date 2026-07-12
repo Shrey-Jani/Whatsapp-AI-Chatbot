@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin — Tax Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="admin">
+    <h1>Admin</h1>
+    <section>
+      <h2>Open escalations</h2>
+      <table id="esc"><thead><tr><th>ID</th><th>Session</th><th>Reason</th><th>When</th></tr></thead><tbody></tbody></table>
+    </section>
+    <section>
+      <h2>Submissions</h2>
+      <table id="sub"><thead><tr><th>ID</th><th>Client</th><th>Status</th><th>PDF</th></tr></thead><tbody></tbody></table>
+    </section>
+  </main>
+  <script>
+    async function load(url, tbody, cols) {
+      const rows = await (await fetch(url)).json();
+      const body = document.querySelector(tbody + " tbody");
+      body.innerHTML = rows.map(r =>
+        "<tr>" + cols.map(c => "<td>" + (r[c] ?? "") + "</td>").join("") + "</tr>").join("")
+        || "<tr><td colspan='4'>None</td></tr>";
+    }
+    load("/api/admin/escalations", "#esc", ["id", "session_id", "reason", "created_at"]);
+    load("/api/admin/submissions", "#sub", ["id", "client_id", "status", "summary_pdf_url"]);
+  </script>
+</body>
+</html>

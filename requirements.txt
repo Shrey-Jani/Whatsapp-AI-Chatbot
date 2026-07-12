@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+pydantic-settings
+python-multipart
+httpx
+jinja2
+google-genai
+supabase
+reportlab
+pytest
