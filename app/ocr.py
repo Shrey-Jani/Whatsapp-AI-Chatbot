@@ -17,7 +17,8 @@ PROMPT = (
 
 
 def extract_slip(data: bytes, mime: str) -> dict:
-    if not settings.gemini_api_key:
+    # Vision is Gemini-only for now; on other providers we skip straight to the pdfplumber path.
+    if settings.llm_provider != "gemini" or not settings.gemini_api_key:
         return {"slip_type": "Unknown", "boxes": {}, "confidence": 0.0}
     try:
         from google import genai
