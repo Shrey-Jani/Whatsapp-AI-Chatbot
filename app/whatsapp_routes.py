@@ -1,11 +1,11 @@
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from sqlalchemy import select
 
-from . import chat_engine, storage
+from . import chat_engine, documents, pdf_generator, submission
 from .config import settings
 from .database import Session
-from .models import ChatSession, Document, Escalation, Tenant
-from .whatsapp import download_media, send_text, verify_signature
+from .models import ChatSession, Escalation, Tenant
+from .whatsapp import download_media, send_document, send_text, upload_media, verify_signature
 
 router = APIRouter()
 
@@ -40,6 +40,10 @@ async def _handle(payload: dict):
                 await _process(pnid, msg)
 
 
+def _operator(tenant) -> str | None:
+    return (tenant.config or {}).get("operator_number")
+
+
 async def _process(phone_number_id: str, msg: dict):
     wa_number = msg["from"]
     async with Session() as db:
@@ -60,7 +64,7 @@ async def _process(phone_number_id: str, msg: dict):
         if mtype in MEDIA_TYPES:
             reply = await _save_media(db, tenant, sess, msg, mtype)
         elif mtype == "text":
-            reply = _advance_text(db, tenant, sess, first_touch, msg["text"]["body"])
+            reply = await _advance_text(db, tenant, sess, first_touch, msg["text"]["body"])
         else:
             reply = None
 
@@ -73,25 +77,59 @@ async def _save_media(db, tenant, sess, msg, mtype) -> str:
     media = msg[mtype]
     filename = media.get("filename") or f"{media['id']}.{_EXT.get(media.get('mime_type'), 'bin')}"
     data, mime = await download_media(tenant, media["id"])
-    # ponytail: supabase-py upload is sync (blocks briefly); wrap in a threadpool if volume grows.
-    key = storage.upload(tenant.id, f"{sess.id}/{filename}", data, mime)
-    db.add(Document(tenant_id=tenant.id, session_id=sess.id,
-                    filename=filename, storage_path=key, file_type=mime))
-    return f"Document received. {filename} saved."
+    reply = documents.handle_file_upload(db, tenant, sess, data, filename, mime)
+
+    op = _operator(tenant)                       # forward the slip to the operator's WhatsApp
+    if op:
+        try:
+            mid = await upload_media(tenant, data, mime, filename)
+            await send_document(tenant, op, mid, filename, caption=f"Slip from {sess.wa_number}")
+        except Exception as e:
+            print(f"[whatsapp] slip forward failed: {e}")
+    return reply
 
 
-def _advance_text(db, tenant, sess, first_touch, text) -> str:
+async def _advance_text(db, tenant, sess, first_touch, text) -> str:
     state = dict(sess.conversation_state_json or {})
-    reply, _done = chat_engine.advance(state, None if first_touch else text)
+    reply, done = (chat_engine.advance(state, None, greeting=text) if first_touch
+                   else chat_engine.advance(state, text))
 
-    if state.get("_escalate") and not state.get("_escalated_recorded"):
+    if await submission.prefill_existing(db, tenant, state):    # existing customer matched by SIN
+        reply, done = chat_engine.advance(state, None)
+        reply = ("Welcome back! Here's your profile on file:\n"
+                 + submission.profile_summary(state) + "\n\n" + reply)
+    elif state.get("details_ok") == "No, update my details" and not state.get("_reasked"):
+        state["_reasked"] = True
+        for f in submission.PREFILL_FIELDS:
+            state.pop(f, None)
+        reply, done = chat_engine.advance(state, None)
+        reply = "No problem — let's update your details.\n\n" + reply
+
+    if state.get("_escalate") and not state.get("_escalate_logged"):
         db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
-                          reason="user requested agent", context_json={"last_message": text}))
-        state["_escalated_recorded"] = True
-        phone = (tenant.config or {}).get("support_phone")
-        reply = ("Connecting you to our team. "
-                 + (f"Please call {phone} or wait for a response." if phone
-                    else "Someone from our team will follow up with you shortly."))
+                          reason=state.get("_escalate_reason", "escalation"),
+                          context_json={k: v for k, v in state.items() if not k.startswith("_")}))
+        state["_escalate_logged"] = True
+        op = _operator(tenant)
+        if op:
+            try:
+                await send_text(tenant, op,
+                                f"⚠️ Escalation ({state.get('_escalate_reason')}) from {sess.wa_number}")
+            except Exception as e:
+                print(f"[whatsapp] escalation notify failed: {e}")
+
+    if done and state.get("_done") and sess.client_id is None:   # first true completion
+        sess.conversation_state_json = state
+        client, _sub = await submission.materialize(db, tenant, sess)
+        op = _operator(tenant)
+        if op:                                   # deliver the summary PDF to the operator
+            try:
+                pdf = await pdf_generator.generate_tax_summary_pdf(db, client.id)
+                mid = await upload_media(tenant, pdf, "application/pdf", f"summary_{client.id}.pdf")
+                await send_document(tenant, op, mid, f"summary_{client.id}.pdf",
+                                    caption=f"New submission: {client.full_name}")
+            except Exception as e:
+                print(f"[whatsapp] operator delivery failed: {e}")
 
     sess.conversation_state_json = state
     return reply
