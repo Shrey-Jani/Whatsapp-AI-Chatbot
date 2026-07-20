@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import chat_engine, ocr, storage
+from . import chat_engine, documents, pdf_generator, pricing, submission
 from .database import get_db
-from .models import ChatSession, Document, Tenant
+from .models import ChatSession, Client, Escalation, Tenant
 from .schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api")
@@ -37,8 +37,41 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(sess)
 
     state = dict(sess.conversation_state_json or {})
-    reply, done = chat_engine.advance(state, None if first_touch else body.message)
+    # On first contact pass the message as `greeting` so the engine can detect their language.
+    reply, done = (chat_engine.advance(state, None, greeting=body.message) if first_touch
+                   else chat_engine.advance(state, body.message))
+
+    if await submission.prefill_existing(db, tenant, state):   # existing customer matched by SIN
+        reply, done = chat_engine.advance(state, None)         # -> "is this still correct?"
+        reply = ("Welcome back! Here's your profile on file:\n"
+                 + submission.profile_summary(state) + "\n\n" + reply)
+    elif state.get("details_ok") == "No, update my details" and not state.get("_reasked"):
+        state["_reasked"] = True                                # they want to change something
+        for f in submission.PREFILL_FIELDS:
+            state.pop(f, None)                                 # clear so the flow re-asks them
+        reply, done = chat_engine.advance(state, None)
+        reply = "No problem — let's update your details.\n\n" + reply
+
     sess.conversation_state_json = state
+
+    if sess.id is None:
+        await db.flush()                       # ensure sess.id for escalation FK
+
+    if state.get("_escalate") and not state.get("_escalate_logged"):
+        db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
+                          reason=state.get("_escalate_reason", "escalation"),
+                          context_json={k: v for k, v in state.items() if not k.startswith("_")}))
+        state["_escalate_logged"] = True
+        sess.conversation_state_json = state
+
+    if done and state.get("_done") and sess.client_id is None:   # first true completion
+        _c, sub = await submission.materialize(db, tenant, sess)
+        # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
+        reply += (f"\n\nYour tax summary has been prepared for our team.\n"
+                  f"Your reference number: {sub.reference_number}")
+        if state.get("third_party_payer") == "Yes":              # shared token (spec §7)
+            reply += "\nThis same reference applies to your payer's file."
+
     await db.commit()
     return ChatResponse(reply=reply, done=done)
 
@@ -52,28 +85,25 @@ async def upload(session_id: str = Form(...), file: UploadFile = File(...),
 
     sess = await _get_or_create_web_session(db, tenant, session_id)
     data = await file.read()
-    mime = file.content_type or "application/octet-stream"
-
-    try:
-        key = storage.upload(tenant.id, f"{sess.id}/{file.filename}", data, mime)
-    except Exception as e:                     # storage not configured yet → keep OCR working
-        print(f"[upload] storage failed: {e}")
-        key = ""
-
-    extracted = ocr.extract_slip(data, mime)
-    db.add(Document(tenant_id=tenant.id, session_id=sess.id, filename=file.filename,
-                    storage_path=key, file_type=mime))
+    reply = documents.handle_file_upload(
+        db, tenant, sess, data, file.filename, file.content_type or "")
 
     state = dict(sess.conversation_state_json or {})
-    slips = state.get("slips", [])
-    slips.append({"filename": file.filename, "slip_type": extracted.get("slip_type"),
-                  "tax_year": extracted.get("tax_year"), "boxes": extracted.get("boxes", {})})
-    state["slips"] = slips
-    sess.conversation_state_json = state
-    await db.commit()
+    if state.get("_done"):            # spec §7 — post-generation slip additions are chargeable
+        reply += (f"\n\nNote: your file was already completed and sent for review. Adding slips "
+                  f"now incurs a ${pricing.PRICING['post_slip_charge']} handling charge "
+                  f"(covers up to 3 slips).")
 
-    st = extracted.get("slip_type", "document")
-    n = len(extracted.get("boxes") or {})
-    detail = f" I read {n} amount(s) off it." if n else ""
-    return ChatResponse(reply=f"Received your {st}.{detail} "
-                              "Upload more slips, or keep answering to continue.", done=False)
+    await db.commit()
+    return ChatResponse(reply=reply, done=False)
+
+
+@router.get("/generate-pdf/{client_id}")
+async def generate_pdf(client_id: int, db: AsyncSession = Depends(get_db)):
+    """Generate the summary PDF on demand and return it directly — nothing is stored."""
+    client = await db.get(Client, client_id)
+    if client is None:
+        return Response(status_code=404)
+    pdf = await pdf_generator.generate_tax_summary_pdf(db, client_id)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="summary_{client_id}.pdf"'})

@@ -3,59 +3,76 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tax Assistant</title>
+  <title>File Your Canadian Taxes via WhatsApp</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-  <div class="chat">
-    <header>Tax Assistant</header>
-    <div id="log" class="log"></div>
-    <form id="f" class="composer">
-      <label class="attach" title="Upload a tax slip (T4, T5, PDF or photo)">
-        📎<input id="file" type="file" accept="image/*,application/pdf" hidden>
-      </label>
-      <input id="m" autocomplete="off" placeholder="Type a message…">
-      <button>Send</button>
-    </form>
-  </div>
-  <script>
-    const sid = "web-" + Math.random().toString(36).slice(2);
-    const log = document.getElementById("log");
-    function add(text, who) {
-      const d = document.createElement("div");
-      d.className = "msg " + who;
-      d.textContent = text;
-      log.appendChild(d);
-      log.scrollTop = log.scrollHeight;
-    }
-    async function send(message) {
-      const r = await fetch("/api/chat", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({session_id: sid, message})
-      });
-      add((await r.json()).reply, "bot");
-    }
-    async function uploadFile(file) {
-      add(`📎 ${file.name}`, "me");
-      const fd = new FormData();
-      fd.append("session_id", sid);
-      fd.append("file", file);
-      const r = await fetch("/api/upload", {method: "POST", body: fd});
-      add((await r.json()).reply, "bot");
-    }
-    document.getElementById("f").addEventListener("submit", e => {
-      e.preventDefault();
-      const m = document.getElementById("m");
-      if (!m.value.trim()) return;
-      add(m.value, "me");
-      send(m.value);
-      m.value = "";
-    });
-    document.getElementById("file").addEventListener("change", e => {
-      if (e.target.files[0]) uploadFile(e.target.files[0]);
-      e.target.value = "";  // allow re-uploading the same file
-    });
-    send("");  // kick off — server replies with the first question
-  </script>
+<body class="landing">
+  <header class="hero">
+    <nav>
+      <span class="brand">Ravi's Accurate Tax Services</span>
+      <span class="nav-phone">647-300-1516</span>
+    </nav>
+    <h1>File Your Canadian Taxes via WhatsApp</h1>
+    <p>Personal tax, GST registration &amp; business filings — done through a simple chat.
+       No apps to install, no forms to print.</p>
+    <!-- Replace the number below with your WhatsApp Business number -->
+    <a class="cta" href="https://wa.me/15551234567?text=Hi">Start Chat on WhatsApp</a>
+    <a class="cta secondary" href="/chat">Try the demo chat</a>
+  </header>
+
+  <section class="section steps">
+    <h2>How It Works</h2>
+    <div class="grid3">
+      <div class="card"><div class="num">1</div><h3>Say Hi</h3>
+        <p>Message us on WhatsApp and pick your language.</p></div>
+      <div class="card"><div class="num">2</div><h3>Answer &amp; Upload</h3>
+        <p>Answer a few questions and snap photos of your slips (T4, T5, T4A).</p></div>
+      <div class="card"><div class="num">3</div><h3>We File</h3>
+        <p>We prepare your summary and file your return. You review and pay by e-Transfer.</p></div>
+    </div>
+  </section>
+
+  <section class="section services">
+    <h2>Services</h2>
+    <div class="grid3">
+      <div class="card price"><h3>Personal Tax</h3><div class="amt">$45+</div>
+        <p>Standard T4 filing, gig/rideshare, rental &amp; more.</p></div>
+      <div class="card price"><h3>GST Registration</h3><div class="amt">$85</div>
+        <p>Get your GST number set up for rideshare / self-employment.</p></div>
+      <div class="card price"><h3>NOA Retrieval</h3><div class="amt">$75</div>
+        <p>We pull your Notice of Assessment on your behalf.</p></div>
+    </div>
+    <p class="fineprint">Prices are indicative and finalized after review.</p>
+  </section>
+
+  <section class="section trust">
+    <div class="badge">🔒 Secure &amp; Private</div>
+    <div class="badge">🍁 CRA Compliant</div>
+    <div class="badge">🌐 English · ਪੰਜਾਬੀ · हिंदी</div>
+  </section>
+
+  <section class="section faq">
+    <h2>Frequently Asked Questions</h2>
+    <details><summary>What if I forget to attach a tax slip?</summary>
+      <p>Don't worry — your tax profile is safe. The CRA automatically attaches missing
+         slips on their end during processing.</p></details>
+    <details><summary>How long does it take?</summary>
+      <p>Most personal returns are reviewed and prepared within a few business days of
+         receiving your documents.</p></details>
+    <details><summary>Why is my refund different from my friend's?</summary>
+      <p>Refunds depend on income, marital status, child benefits, carry-forward credits and
+         provincial factors — every profile is unique, so direct comparisons aren't accurate.</p></details>
+    <details><summary>How do I pay?</summary>
+      <p>Payment is by Interac e-Transfer after you approve your estimate. All transactions
+         are final — no refunds once processing has started.</p></details>
+    <details><summary>Is my information secure?</summary>
+      <p>Yes. Your details are handled confidentially and used only to prepare your filing.</p></details>
+  </section>
+
+  <footer class="site-footer">
+    <div>Ravi's Accurate Tax Services</div>
+    <div>📞 647-300-1516 &nbsp;·&nbsp; 905-798-3785</div>
+    <div class="tagline">THE NAME YOU CAN TRUST</div>
+  </footer>
 </body>
 </html>

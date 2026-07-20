@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tax Assistant — Demo Chat</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="chat">
+    <header>Tax Assistant
+      <button id="staff" class="staff-btn" type="button">Speak with Staff</button>
+    </header>
+    <div id="log" class="log"></div>
+    <form id="f" class="composer">
+      <label class="attach" title="Upload tax slips — select multiple (T4, T4A, T5, PDF or photo)">
+        📎<input id="file" type="file" accept="image/*,application/pdf" multiple hidden>
+      </label>
+      <input id="m" autocomplete="off" placeholder="Type a message…">
+      <button>Send</button>
+    </form>
+  </div>
+  <script>
+    const sid = "web-" + Math.random().toString(36).slice(2);
+    const log = document.getElementById("log");
+    function add(text, who) {
+      const d = document.createElement("div");
+      d.className = "msg " + who;
+      d.textContent = text;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+    async function send(message) {
+      const r = await fetch("/api/chat", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({session_id: sid, message})
+      });
+      add((await r.json()).reply, "bot");
+    }
+    async function uploadFile(file) {
+      add(`📎 ${file.name}`, "me");
+      const fd = new FormData();
+      fd.append("session_id", sid);
+      fd.append("file", file);
+      const r = await fetch("/api/upload", {method: "POST", body: fd});
+      add((await r.json()).reply, "bot");
+    }
+    document.getElementById("f").addEventListener("submit", e => {
+      e.preventDefault();
+      const m = document.getElementById("m");
+      if (!m.value.trim()) return;
+      add(m.value, "me");
+      send(m.value);
+      m.value = "";
+    });
+    document.getElementById("file").addEventListener("change", async e => {
+      const files = Array.from(e.target.files);
+      e.target.value = "";
+      for (const f of files) await uploadFile(f);
+    });
+    document.getElementById("staff").addEventListener("click", () => {
+      add("Speak with Staff", "me");
+      send("agent");                     // triggers escalation on the server
+    });
+    // Client-side hint only — the user's own first message is what detects their language,
+    // so we must NOT auto-send anything here.
+    add("👋 Say hi to get started — you can write in English, Hindi or Punjabi.", "bot");
+  </script>
+</body>
+</html>

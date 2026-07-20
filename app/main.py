@@ -36,6 +36,11 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/chat")
+async def chat_page(request: Request):
+    return templates.TemplateResponse(request, "chat.html")
+
+
 @app.get("/admin")
 async def admin(request: Request):
     return templates.TemplateResponse(request, "admin.html")

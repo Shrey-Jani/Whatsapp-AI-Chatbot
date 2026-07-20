@@ -7,27 +7,133 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="admin">
-    <h1>Admin</h1>
-    <section>
-      <h2>Open escalations</h2>
-      <table id="esc"><thead><tr><th>ID</th><th>Session</th><th>Reason</th><th>When</th></tr></thead><tbody></tbody></table>
-    </section>
-    <section>
-      <h2>Submissions</h2>
-      <table id="sub"><thead><tr><th>ID</th><th>Client</th><th>Status</th><th>PDF</th></tr></thead><tbody></tbody></table>
-    </section>
+  <!-- Login gate -->
+  <div id="login" class="login-overlay">
+    <form id="loginForm" class="login-box">
+      <h2>Admin Login</h2>
+      <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password">
+      <button>Enter</button>
+      <p id="loginErr" class="err"></p>
+    </form>
+  </div>
+
+  <main class="admin" id="app" hidden>
+    <div class="admin-head">
+      <h1>Submissions</h1>
+      <input id="search" placeholder="Search name or phone…">
+    </div>
+    <table id="sub">
+      <thead><tr><th>Client</th><th>Phone</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h1 style="margin-top:32px;">Open Escalations</h1>
+    <table id="esc">
+      <thead><tr><th>Reason</th><th>Session</th><th>When</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </main>
+
+  <!-- Detail modal -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeModal()">×</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
   <script>
-    async function load(url, tbody, cols) {
-      const rows = await (await fetch(url)).json();
-      const body = document.querySelector(tbody + " tbody");
-      body.innerHTML = rows.map(r =>
-        "<tr>" + cols.map(c => "<td>" + (r[c] ?? "") + "</td>").join("") + "</tr>").join("")
-        || "<tr><td colspan='4'>None</td></tr>";
+    let KEY = sessionStorage.getItem("adminKey") || "";
+    let ROWS = [];
+    const STATUSES = ["pending", "in_review", "completed"];
+
+    const hdr = () => ({ "X-Admin-Key": KEY });
+
+    async function api(url, opts = {}) {
+      return fetch(url, { ...opts, headers: { ...hdr(), ...(opts.headers || {}) } });
     }
-    load("/api/admin/escalations", "#esc", ["id", "session_id", "reason", "created_at"]);
-    load("/api/admin/submissions", "#sub", ["id", "client_id", "status", "summary_pdf_url"]);
+
+    document.getElementById("loginForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      KEY = document.getElementById("pw").value;
+      const r = await api("/api/admin/submissions");
+      if (r.status === 401) { document.getElementById("loginErr").textContent = "Wrong password."; return; }
+      sessionStorage.setItem("adminKey", KEY);
+      document.getElementById("login").hidden = true;
+      document.getElementById("app").hidden = false;
+      ROWS = await r.json();
+      render();
+      loadEscalations();
+    });
+
+    async function loadEscalations() {
+      const rows = await (await api("/api/admin/escalations")).json();
+      document.querySelector("#esc tbody").innerHTML = rows.map(e =>
+        `<tr><td>${e.reason}</td><td>${e.session_id}</td>` +
+        `<td>${(e.created_at || "").slice(0, 16).replace("T", " ")}</td></tr>`).join("")
+        || `<tr><td colspan="3">None</td></tr>`;
+    }
+
+    function render() {
+      const q = document.getElementById("search").value.toLowerCase();
+      const rows = ROWS.filter(r =>
+        (r.client_name || "").toLowerCase().includes(q) || (r.phone || "").includes(q));
+      const body = document.querySelector("#sub tbody");
+      body.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.client_name ?? "—"}</td>
+          <td>${r.phone ?? "—"}</td>
+          <td>${(r.date || "").slice(0, 10)}</td>
+          <td>
+            <select onchange="updateStatus(${r.id}, this.value)">
+              ${STATUSES.map(s => `<option ${s === r.status ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+          </td>
+          <td>
+            <button onclick="view(${r.id})">View</button>
+            <button onclick="downloadPdf(${r.id})">PDF</button>
+          </td>
+        </tr>`).join("") || `<tr><td colspan="5">No submissions yet.</td></tr>`;
+    }
+
+    document.getElementById("search").addEventListener("input", render);
+
+    async function updateStatus(id, status) {
+      await api(`/api/admin/submissions/${id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      const row = ROWS.find(r => r.id === id); if (row) row.status = status;
+    }
+
+    async function view(id) {
+      const d = await (await api(`/api/admin/submissions/${id}`)).json();
+      const kv = o => Object.entries(o).map(([k, v]) =>
+        `<tr><th>${k.replace(/_/g, " ")}</th><td>${v ?? "—"}</td></tr>`).join("");
+      const docs = d.documents.length
+        ? `<table>${d.documents.map(x =>
+            `<tr><td>${x.slip_type ?? "—"}</td><td>${x.employer ?? "—"}</td><td>${x.filename}</td></tr>`).join("")}</table>`
+        : "<p>No documents.</p>";
+      document.getElementById("modalBody").innerHTML =
+        `<h2>Client Details</h2><table>${kv(d.client)}</table>
+         <h3>Documents (parsed — files delivered via WhatsApp)</h3>${docs}
+         <h3>Notes</h3><p>${d.admin_notes ?? "—"}</p>`;
+      document.getElementById("modal").hidden = false;
+    }
+    function closeModal() { document.getElementById("modal").hidden = true; }
+
+    async function downloadPdf(id) {
+      const r = await api(`/api/admin/submissions/${id}/download-pdf`);
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `summary_${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // auto-login if key already stored
+    if (KEY) document.getElementById("loginForm").dispatchEvent(new Event("submit"));
   </script>
 </body>
 </html>
