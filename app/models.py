@@ -29,7 +29,8 @@ class Client(Base):
     full_name: Mapped[str | None] = mapped_column(String, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
-    sin: Mapped[str | None] = mapped_column(String, nullable=True)   # PII — never logged
+    # PII — never logged. Indexed because returning customers are matched on it.
+    sin: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     dob: Mapped[str | None] = mapped_column(String, nullable=True)   # DD/MM/YYYY per spec
     address: Mapped[str | None] = mapped_column(String, nullable=True)
     marital_status: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -44,6 +45,7 @@ class Client(Base):
     landing_date: Mapped[str | None] = mapped_column(String, nullable=True)
     is_newcomer: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     additional_notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_answers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # full intake, lossless
     status: Mapped[str] = mapped_column(String, default="intake")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -60,6 +62,10 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String)
     storage_path: Mapped[str] = mapped_column(String)   # Supabase Storage key
     file_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    slip_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    employer_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    income_amount: Mapped[str | None] = mapped_column(String, nullable=True)
+    parsed_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -85,6 +91,7 @@ class Submission(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    reference_number: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     summary_pdf_url: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
     admin_notes: Mapped[str | None] = mapped_column(String, nullable=True)
