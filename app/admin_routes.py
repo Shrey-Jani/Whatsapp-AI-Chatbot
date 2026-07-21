@@ -8,6 +8,7 @@ from . import pdf_generator
 from .config import settings
 from .database import get_db
 from .models import Client, Document, Escalation, Submission
+from .security import reveal_sin
 
 
 def require_admin(x_admin_key: str = Header(default="")):
@@ -43,7 +44,7 @@ async def submission_detail(submission_id: int, db: AsyncSession = Depends(get_d
         "id": sub.id, "status": sub.status, "admin_notes": sub.admin_notes,
         "client": dict(client.raw_answers or {}) | {
             "full_name": client.full_name, "phone": client.phone, "email": client.email,
-            "sin": client.sin, "dob": client.dob, "address": client.address,
+            "sin": reveal_sin(client.sin), "dob": client.dob, "address": client.address,
             "marital_status": client.marital_status},
         # Files aren't stored (no cloud storage) — this is the parsed metadata only.
         "documents": [{"filename": d.filename, "slip_type": d.slip_type,

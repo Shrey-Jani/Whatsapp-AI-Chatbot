@@ -11,7 +11,9 @@ from datetime import datetime
 
 from . import i18n, llm
 from .pricing import PRICING, estimate
-from .question_flow import GST_WARNING, QUESTIONS, RIDESHARE_PLATFORMS
+from .question_flow import (CRA_HELPLINE, ETRANSFER_DIRECTIVE, GST_WARNING, MOVING_CHECKLIST,
+                            PROCUREMENT_SLA, QUESTIONS, REP_ID_INSTRUCTION, RIDESHARE_PLATFORMS,
+                            WORLD_INCOME)
 
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
@@ -265,14 +267,28 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     state[q["field"]] = value
     answers[q["field"]] = value
 
-    extra = ""                                 # spec §4: 2+ platforms → GST number is mandatory
-    if q["field"] in ("gig_platforms", "gst_platforms") and _multi_platform(value):
+    notices = []                               # contextual guidance shown before the next question
+    f = q["field"]
+    if f in ("gig_platforms", "gst_platforms") and _multi_platform(value):   # §4 mandatory GST
         state["gst_required"] = "Yes"
-        extra = (i18n.localize(
+        notices.append(i18n.localize(
             "Because you operate on more than one rideshare/delivery platform, a dedicated "
             f"GST number is MANDATORY (registration ${PRICING['gst_setup']['flat']}).", lang)
-            + f"\n\n{GST_WARNING}")     # warning itself stays verbatim English
+            + f"\n\n{GST_WARNING}")            # warning itself stays verbatim
+    if f == "province_changed" and value == "Yes":                           # §3 moving expenses
+        notices.append(i18n.localize(MOVING_CHECKLIST, lang))
+    if f == "gst_service" and value == "Register for a GST Number":          # §4 procurement SLA
+        notices.append(i18n.localize(PROCUREMENT_SLA, lang))
+    if f == "corp_gst_number" and value.strip().lower() == "none":           # §5 CRA helpline
+        notices.append(CRA_HELPLINE)           # mandated verbatim (+ phone)
+    if f == "reg_type" and value == "New Incorporation":                     # §6 e-Transfer first
+        notices.append(ETRANSFER_DIRECTIVE)    # mandated verbatim
+    if f == "has_mycra" and value == "Yes":                                  # §2A add Rep ID
+        notices.append(i18n.localize(REP_ID_INSTRUCTION, lang))
+    if f == "landed_2024" and value == "Yes":                                # §2B world income
+        notices.append(i18n.localize(WORLD_INCOME, lang))
 
+    extra = "\n\n".join(notices)
     nxt = get_next_question(answers)
     if nxt is None:                           # last answer → estimate + thank-you + KB link
         state["_done"] = True

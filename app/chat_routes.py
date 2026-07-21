@@ -60,7 +60,7 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
     if state.get("_escalate") and not state.get("_escalate_logged"):
         db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
                           reason=state.get("_escalate_reason", "escalation"),
-                          context_json={k: v for k, v in state.items() if not k.startswith("_")}))
+                          context_json={k: v for k, v in state.items() if not k.startswith("_") and k not in ("sin", "spouse_sin")}))
         state["_escalate_logged"] = True
         sess.conversation_state_json = state
 

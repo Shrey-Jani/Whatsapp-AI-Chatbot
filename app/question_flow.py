@@ -50,6 +50,30 @@ GST_WARNING = ("Warning: Failure to file your required GST returns will prompt t
 # Rideshare/delivery platforms — operating on 2+ makes a GST number mandatory (spec §4).
 RIDESHARE_PLATFORMS = ("uber", "lyft", "doordash", "skip", "instacart")
 
+# Guidance messages (spec §3-6). Mandated/verbatim ones are NOT translated; helpful ones are.
+CRA_HELPLINE = ("Please contact the CRA corporate helpline directly at 1-800-959-5525, "
+                "press 4 to instantly instantiate corporate account access.")            # §5 verbatim
+ETRANSFER_DIRECTIVE = ("You must successfully submit the complete fee amount via e-Transfer. "
+                       "Processing and business formation work will only commence once payment "
+                       "confirmation is received.")                                       # §6 verbatim
+PROCUREMENT_SLA = ("Same-day acquisition of your GST number is targeted via automated routing. "
+                   "If manual filing exceptions occur, processing via official form submissions "
+                   "can take 2 to 3 weeks.")                                              # §4
+MOVING_CHECKLIST = ("Since you changed provinces, you may be able to claim moving expenses — keep "
+                    "receipts for: transportation & storage of household goods; travel (mileage, "
+                    "meals, lodging) during the move; temporary lodging near the new home; "
+                    "lease-cancellation costs; and incidentals (address changes, utility "
+                    "hook-ups). We'll help you claim the eligible amounts.")              # §3
+
+# §2 CRA Access Authorization guidance.
+REP_ID_INSTRUCTION = ("To secure direct CRA access, please add our firm's Representative ID to "
+                      "your CRA My Account, set to Access Level 2 with No Expiry. This lets us "
+                      "preemptively avoid reassessments or unexpected penalties. We'll share our "
+                      "Representative ID with you.")                                      # §2 A
+WORLD_INCOME = ("As you're new to Canada, we've noted your calendar year of landing. Please note: "
+                "you are legally required to report your preceding worldwide income in Canadian "
+                "dollars (CAD) — please call the CRA directly to report it.")            # §2 B
+
 # ---------------------------------------------------------------- router
 # Asked first, for everyone — before the tax-type router.
 CUSTOMER_Q = {"id": -1, "field": "customer_status", "type": "select",
@@ -113,6 +137,23 @@ PERSONAL = [
      "prompt": "Did you land / arrive in Canada in 2024?", "ai_parse": "Return Yes or No."},
     {"id": 23, "field": "landing_date", "type": "date", "year": 2024, "condition": YES("landed_2024"),
      "prompt": "Your exact landing date in Canada in 2024 (DD/MM/YYYY)?", "ai_parse": "Landing date DD/MM/YYYY."},
+
+    # §2 CRA Access Authorization — new-to-firm clients residing in Canada (not brand-new arrivals).
+    {"id": 23.3, "field": "has_mycra", "type": "boolean", "options": ["Yes", "No"],
+     "condition": lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") == "No",
+     "prompt": "Do you have an active myCRA (CRA My Account) online account?",
+     "ai_parse": "Return Yes or No."},
+
+    {"id": 23.6, "field": "noa_method", "type": "select",
+     "condition": lambda a: a.get("has_mycra") == "No",
+     "options": ["Digital download (free)", "CRA phone request (free)", "Have us obtain it ($75)"],
+     "prompt": "Since you don't have a myCRA account, we'll need your Notice of Assessment (NoA) "
+               "from last year, plus a summary of any credits to carry forward. There are three "
+               "ways to get your NoA — how would you like to proceed?\n"
+               "• Digital download — log into your CRA account and fetch it instantly (free)\n"
+               "• CRA phone request — call 1-800-959-8281 for a copy by mail/email (free)\n"
+               "• Have us obtain it — we pull and process it for you ($75 per NoA)",
+     "ai_parse": "Map to one of: Digital download (free), CRA phone request (free), Have us obtain it ($75)."},
 
     {"id": 8, "field": "marital_status", "type": "select",
      "options": ["Single", "Married", "Common-Law", "Divorced", "Separated", "Widowed"],

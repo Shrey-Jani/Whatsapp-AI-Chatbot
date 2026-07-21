@@ -27,5 +27,10 @@ class Settings(BaseSettings):
     # Active filing year — slips are auto-matched against this.
     tax_year: int = 2025
 
+    # SIN encryption at rest (Fernet key). Generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Empty = SINs stored in plaintext (dev only). Back up this key — losing it loses the SINs.
+    sin_encryption_key: str = ""
+
 
 settings = Settings()

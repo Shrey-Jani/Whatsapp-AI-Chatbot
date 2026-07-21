@@ -31,7 +31,7 @@ def test_flow_reaches_address_after_core():
 
 
 def test_single_filer_skips_spouse_and_children():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", marital_status="Single")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Single")
     # spouse + marital-date + children questions are all conditional → skipped for Single
     assert get_next_question(answers)["field"] == "filed_last_year"
 
@@ -67,12 +67,12 @@ def test_age_bounds():
 
 
 def test_married_flow_asks_marriage_date():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", marital_status="Married")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Married")
     assert get_next_question(answers)["field"] == "marriage_date"
 
 
 def test_widowed_flow_asks_date_of_death():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", marital_status="Widowed")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Widowed")
     assert get_next_question(answers)["field"] == "date_of_death"
 
 
@@ -145,6 +145,55 @@ def test_multi_platform_triggers_mandatory_gst():
     assert ce._multi_platform("uber, doordash, instacart")
     assert not ce._multi_platform("just Uber")                  # single platform → not mandatory
     assert not ce._multi_platform("")
+
+
+def test_new_resident_asked_mycra_and_gets_repid(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    # New customer, resides in Canada (landed_2024=No) → gets the myCRA question
+    answers = dict(CORE, address="1 St", age="35", landed_2024="No")
+    assert ce.get_next_question(answers)["field"] == "has_mycra"
+    # answering Yes surfaces the Rep-ID instruction
+    state = dict(answers)
+    reply, _ = ce.advance(state, "Yes")
+    assert "Representative ID" in reply
+
+
+def test_newcomer_gets_world_income_notice(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    state = dict(CORE, address="1 St", age="35")   # landed_2024 is the next question
+    reply, _ = ce.advance(state, "Yes")            # landed in Canada in 2024
+    assert "worldwide income" in reply.lower()
+
+
+def test_incorporation_shows_etransfer_directive(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    state = {"customer_status": "New Customer", "service_type": "Business Registration"}
+    reply, _ = ce.advance(state, "New Incorporation")     # reg_type answered
+    assert "e-Transfer" in reply
+
+
+def test_gst_register_shows_procurement_sla(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    state = {"customer_status": "New Customer", "service_type": "GST/HST"}
+    reply, _ = ce.advance(state, "Register for a GST Number")   # gst_service answered
+    assert "2 to 3 weeks" in reply
+
+
+def test_sin_encryption_round_trip():
+    from cryptography.fernet import Fernet
+    from app import security
+    from app.config import settings
+    settings.sin_encryption_key = Fernet.generate_key().decode()
+    security._fernet.cache_clear()
+    enc = security.protect_sin("046 454 286")
+    assert enc.startswith("enc:") and enc != "046 454 286"      # stored value is ciphertext
+    assert security.reveal_sin(enc) == "046 454 286"            # round-trips
+    assert security.reveal_sin("plaintext-passthrough") == "plaintext-passthrough"
+    assert security.digits("046 454 286") == "046454286"        # normalised for lookup
 
 
 def test_pricing_estimates():

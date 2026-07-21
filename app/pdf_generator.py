@@ -15,6 +15,7 @@ from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate, Spacer,
 from sqlalchemy import select
 
 from .models import Client, Document, Submission, Tenant
+from .security import reveal_sin
 
 BRAND = "#075e54"
 BRANDING_DEFAULT = {
@@ -177,4 +178,8 @@ async def generate_tax_summary_pdf(db, client_id) -> bytes:
     documents = [{"slip_type": d.slip_type, "employer": d.employer_name, "filename": d.filename}
                  for d in docs]
     ref = (sub.reference_number or str(sub.id)) if sub else "—"
-    return build_summary_pdf(dict(client.raw_answers or {}), documents, branding, ref)
+    data = dict(client.raw_answers or {})
+    data["sin"] = reveal_sin(client.sin)      # decrypted for the firm's working copy
+    if client.spouse_json and client.spouse_json.get("sin"):
+        data["spouse_sin"] = reveal_sin(client.spouse_json["sin"])
+    return build_summary_pdf(data, documents, branding, ref)

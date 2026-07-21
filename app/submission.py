@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 
 from .config import settings
 from .models import Client, Document, Submission
+from .security import digits, protect_sin, reveal_sin
 
 # Stable profile fields we pre-fill for a returning (existing) customer matched by SIN.
 # Year-specific answers (income, rent, this year's changes) are always re-asked.
@@ -15,7 +16,7 @@ STABLE_FIELDS = {
     "marriage_date", "cohabitation_date", "divorce_date", "separation_date", "date_of_death",
     "spouse_in_canada", "spouse_name", "spouse_dob", "spouse_sin", "spouse_income",
     "spouse_address", "has_children", "children_details", "sin_document",
-}
+}   # note: spouse_sin is NOT prefilled — it's encrypted and kept out of the JSON blob
 # Recurring tax details also carried over (last year's values — the confirmation step lets the
 # customer update anything that changed).
 TAX_FIELDS = {
@@ -39,14 +40,16 @@ async def materialize(db, tenant, sess):
     a = {k: v for k, v in (sess.conversation_state_json or {}).items() if not k.startswith("_")}
     married = a.get("marital_status") in ("Married", "Common-Law")
     left = a.get("left_canada_date")
+    # Keep plaintext SINs out of the JSON blobs — the encrypted values live on typed columns.
+    raw = {k: v for k, v in a.items() if k not in ("sin", "spouse_sin")}
 
     client = Client(
         tenant_id=tenant.id,
         full_name=a.get("full_name"), phone=a.get("phone"), email=a.get("email"),
-        sin=a.get("sin"), dob=a.get("dob"), address=a.get("address"),
+        sin=protect_sin(a.get("sin")), dob=a.get("dob"), address=a.get("address"),
         marital_status=a.get("marital_status"),
         spouse_json={"name": a.get("spouse_name"), "dob": a.get("spouse_dob"),
-                     "sin": a.get("spouse_sin"), "income": a.get("spouse_income"),
+                     "sin": protect_sin(a.get("spouse_sin")), "income": a.get("spouse_income"),
                      "address": a.get("spouse_address"),
                      "in_canada": a.get("spouse_in_canada")} if married else None,
         children_json=[a["children_details"]] if a.get("has_children") == "Yes" and a.get("children_details") else None,
@@ -59,11 +62,14 @@ async def materialize(db, tenant, sess):
         is_newcomer=a.get("landed_2024") == "Yes",
         additional_notes=a.get("additional_notes"),
         status="submitted",
-        raw_answers=a,
+        raw_answers=raw,
     )
     db.add(client)
     await db.flush()                          # need client.id
 
+    # Scrub the plaintext SINs from the transient session record too.
+    sess.conversation_state_json = {k: v for k, v in (sess.conversation_state_json or {}).items()
+                                    if k not in ("sin", "spouse_sin")}
     sess.client_id = client.id
     await db.execute(update(Document).where(Document.session_id == sess.id)
                      .values(client_id=client.id))       # link uploaded slips to the client
@@ -87,9 +93,15 @@ async def prefill_existing(db, tenant, state) -> bool:
     if not state.get("sin") or state.get("_prefilled"):
         return False
     state["_prefilled"] = True
-    prior = (await db.scalars(
-        select(Client).where(Client.tenant_id == tenant.id, Client.sin == state["sin"])
-        .order_by(Client.created_at.desc()))).first()
+    # SINs are encrypted (non-deterministic), so we can't match on the ciphertext — decrypt each
+    # tenant client and compare. Fine at single-operator scale; add a blind index if it ever grows.
+    target = digits(state["sin"])
+    prior = None
+    for c in (await db.scalars(select(Client).where(Client.tenant_id == tenant.id)
+                               .order_by(Client.created_at.desc()))).all():
+        if digits(reveal_sin(c.sin)) == target:
+            prior = c
+            break
     if prior is None:
         return False
     src = dict(prior.raw_answers or {})
