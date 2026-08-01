@@ -112,15 +112,29 @@
         `<tr><th>${k.replace(/_/g, " ")}</th><td>${v ?? "—"}</td></tr>`).join("");
       const docs = d.documents.length
         ? `<table>${d.documents.map(x =>
-            `<tr><td>${x.slip_type ?? "—"}</td><td>${x.employer ?? "—"}</td><td>${x.filename}</td></tr>`).join("")}</table>`
+            `<tr><td>${x.slip_type ?? "—"}</td><td>${x.employer ?? "—"}</td>` +
+            `<td>${x.has_file
+                     ? `<a href="#" onclick="downloadDoc(${x.id},'${x.filename}');return false;">${x.filename}</a>`
+                     : x.filename}</td></tr>`).join("")}</table>`
         : "<p>No documents.</p>";
       document.getElementById("modalBody").innerHTML =
         `<h2>Client Details</h2><table>${kv(d.client)}</table>
-         <h3>Documents (parsed — files delivered via WhatsApp)</h3>${docs}
+         <h3>Documents (click a filename to download)</h3>${docs}
          <h3>Notes</h3><p>${d.admin_notes ?? "—"}</p>`;
       document.getElementById("modal").hidden = false;
     }
     function closeModal() { document.getElementById("modal").hidden = true; }
+
+    async function downloadDoc(id, filename) {
+      const r = await api(`/api/admin/documents/${id}/download`);
+      if (!r.ok) { alert("File not found."); return; }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename || `document_${id}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
 
     async function downloadPdf(id) {
       const r = await api(`/api/admin/submissions/${id}/download-pdf`);

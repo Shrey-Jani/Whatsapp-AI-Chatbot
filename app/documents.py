@@ -5,7 +5,7 @@ primary reader (accurate on real slip layouts); pdfplumber is a cheap fallback f
 when vision can't identify the slip. Full parsed data is saved to the Document for the firm;
 the user only sees a short "<slip> received." confirmation.
 """
-from . import ocr, pdf_parser
+from . import ocr, pdf_parser, storage
 from .config import settings
 from .models import Document
 
@@ -33,15 +33,19 @@ def handle_file_upload(db, tenant, sess, data: bytes, filename: str, content_typ
     if kind is None:
         return "Unsupported file type. Please upload a PDF, JPG, or PNG."
 
-    # No cloud storage: the file is OCR'd here, then discarded. The file itself is forwarded
-    # to the operator's WhatsApp when Meta is wired. ponytail: forward-on-upload, no bucket.
     meta = _parse(data, content_type, kind)
     slip_type = meta.get("slip_type") or "unknown"
     employer = meta.get("employer_name") or meta.get("issuer")
     income = meta.get("income_amount")
 
+    try:                                       # keep the actual file so the firm can retrieve it
+        key = storage.upload(tenant.id, f"{sess.id}/{filename}", data, content_type)
+    except Exception as e:
+        print(f"[documents] file storage failed: {e}")
+        key = ""
+
     db.add(Document(
-        tenant_id=tenant.id, session_id=sess.id, filename=filename, storage_path="",
+        tenant_id=tenant.id, session_id=sess.id, filename=filename, storage_path=key,
         file_type=content_type, slip_type=slip_type, employer_name=employer,
         income_amount=str(income) if income else None, parsed_metadata=meta))
 

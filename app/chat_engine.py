@@ -11,18 +11,32 @@ from datetime import datetime
 
 from . import i18n, llm
 from .pricing import PRICING, estimate
-from .question_flow import (CRA_HELPLINE, ETRANSFER_DIRECTIVE, GST_WARNING, MOVING_CHECKLIST,
-                            PROCUREMENT_SLA, QUESTIONS, REP_ID_INSTRUCTION, RIDESHARE_PLATFORMS,
-                            WORLD_INCOME)
+from .question_flow import (CRA_HELPLINE, ETRANSFER_DIRECTIVE, GST_WARNING, HOME_BUYER_LINKS,
+                            MOVING_CHECKLIST, NEWCOMER_LINKS, PROCUREMENT_SLA, QUESTIONS,
+                            REP_ID_INSTRUCTION, RIDESHARE_LINKS, RIDESHARE_PLATFORMS,
+                            SPOUSE_ABROAD_LINKS, WORLD_INCOME)
 
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
-DONE_MSG = ("Thank you — we have everything we need. Our team will review your details and "
+# "Take me back to the previous question" — phrases that undo the last answer.
+GO_BACK_PHRASES = ("go back", "wrong choice", "wrong answer", "wrong option", "previous question",
+                   "made a mistake", "change my answer", "change the previous", "correct the previous",
+                   "back to previous", "galat", "oops")
+# At the review step a client can edit any field by naming it (e.g. "change my email").
+EDIT_ALIASES = {"e-mail": "email", "email": "email", "name": "full_name", "mobile": "phone",
+                "contact number": "phone", "phone": "phone", "address": "address",
+                "insurance number": "sin", "sin": "sin", "date of birth": "dob", "birth": "dob",
+                "dob": "dob", "age": "age", "marital": "marital_status", "marriage": "marital_status"}
+# Fields shown in the review summary so the client can catch a mistake (incl. a mistyped SIN).
+REVIEW_FIELDS = [("full_name", "Name"), ("phone", "Phone"), ("email", "Email"),
+                 ("sin", "SIN"), ("age", "Age"), ("dob", "Date of birth"),
+                 ("address", "Address"), ("marital_status", "Marital status")]
+DONE_MSG = ("Thank you we have everything we need. Our team will review your details and "
             "send your Information Sheet and price estimate shortly.\n\n"
             "Payment is by Interac e-Transfer once you approve the estimate; work begins after "
             "payment is confirmed.")
 # Mandated verbatim (spec §7) — never translated.
-POLICY_MSG = "All transactions are final — no refunds once processing has started."
+POLICY_MSG = "All transactions are final no refunds once processing has started."
 # ponytail: per-tenant prices + the generated Information Sheet PDF attach here in Phase 5.
 CLOSING_MSG = "Thank you, Have a nice day."
 # Spec §8 — permanent knowledge-base link, appended to the completion message.
@@ -174,8 +188,16 @@ def parse_answer(user_text: str, question: dict, lang: str = i18n.DEFAULT) -> di
         return {"value": choice, "confidence": 1.0}
     if question["type"] == "file":
         return {"value": user_text.strip() or "[uploaded]", "confidence": 1.0}
+    # A short literal the field explicitly allows (its ai_parse quotes it, e.g. 'No', 'none',
+    # 'unknown') must be kept verbatim — otherwise the LLM's "return empty when the user
+    # declines" rule turns it into an empty value and validation loops.
+    raw = user_text.strip()
+    if question.get("check") == "date_or_no" and raw.lower() in ("no", "none", "n", "na", "n/a", "nil", "nope"):
+        return {"value": "No", "confidence": 1.0}
+    if raw and f"'{raw.lower()}'" in question.get("ai_parse", "").lower():
+        return {"value": raw, "confidence": 1.0}
     if not llm.configured():
-        return {"value": user_text.strip(), "confidence": 1.0}
+        return {"value": raw, "confidence": 1.0}
     try:
         prompt = (f'{question["ai_parse"]}\n\nUser message: "{user_text}"\n'
                   'If the message does not actually contain a valid answer (e.g. the user says '
@@ -198,12 +220,19 @@ def _multi_platform(text: str) -> bool:
     return sum(1 for p in RIDESHARE_PLATFORMS if p in low) >= 2
 
 
-def _render(q: dict, lang: str = i18n.DEFAULT) -> str:
+def _review_summary(answers: dict, lang: str = i18n.DEFAULT) -> str:
+    lines = [f"• {label}: {answers[f]}" for f, label in REVIEW_FIELDS if answers.get(f)]
+    return i18n.localize("Here's a summary of your details:", lang) + "\n" + "\n".join(lines)
+
+
+def _render(q: dict, lang: str = i18n.DEFAULT, answers: dict | None = None) -> str:
     body = q["prompt"]
     if q.get("options"):
         opts = "\n".join(f"{i + 1}. {o}" for i, o in enumerate(q["options"]))
         body = f"{body}\n{opts}"
     body = i18n.localize(body, lang)
+    if q["field"] == "confirmation" and answers:      # show the details to review before confirming
+        body = f"{_review_summary(answers, lang)}\n\n{body}"
     # Mandated verbatim legal text — deliberately NOT translated (needs human sign-off).
     pre = q.get("preamble")
     return f"{pre}\n\n{body}" if pre else body
@@ -230,8 +259,8 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         lang = state.get("_lang", i18n.DEFAULT)
         if q is None:
             return _done_message(answers, lang), True
-        return (i18n.greet_and_ask(greeting, _render(q, lang), lang) if greeting
-                else _render(q, lang)), False
+        return (i18n.greet_and_ask(greeting, _render(q, lang, answers), lang) if greeting
+                else _render(q, lang, answers)), False
 
     lang = state.get("_lang", i18n.DEFAULT)
 
@@ -242,6 +271,28 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         state["_escalate"] = True
         state["_escalate_reason"] = "customer requested staff"
         return i18n.localize(ESCALATE_MSG, lang), True
+
+    low = user_text.strip().lower()
+    if any(p in low for p in GO_BACK_PHRASES):   # undo the previous answer and re-ask it
+        history = state.get("_history") or []
+        if history:
+            state.pop(history.pop(), None)       # remove the last answer → it becomes current again
+            state["_history"] = history
+            prev = get_next_question(_answers(state))
+            back = i18n.localize("No problem — let's redo that.", lang)
+            return (f"{back}\n\n{_render(prev, lang, _answers(state))}", False) if prev \
+                else (_done_message(_answers(state), lang), True)
+        return i18n.localize("There's nothing to go back to yet.", lang) + "\n\n" + _render(q, lang, answers), False
+
+    # At the review step, "change <field>" edits that one detail and re-asks it.
+    if q and q["field"] == "confirmation" and low not in ("yes", "y", "confirm", "yes all correct"):
+        for kw, field in EDIT_ALIASES.items():
+            if kw in low and field in answers:
+                state.pop(field, None)
+                state["_history"] = [h for h in state.get("_history", []) if h != field]
+                nq = get_next_question(_answers(state))
+                return (f"{i18n.localize('Sure — let us update that.', lang)}\n\n"
+                        f"{_render(nq, lang, _answers(state))}", False)
 
     if state.get("_done") or q is None:       # intake already finished — just close politely
         state["_done"] = True
@@ -261,11 +312,12 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
             return i18n.localize(
                 "I'm having trouble understanding your answer — I'm connecting you with our "
                 "staff, who will follow up with you shortly.", lang), True
-        return f"{i18n.localize(err, lang)}\n\n{_render(q, lang)}", False
+        return f"{i18n.localize(err, lang)}\n\n{_render(q, lang, answers)}", False
 
     state.pop(f"_err_{q['field']}", None)      # clear the error counter on success
     state[q["field"]] = value
     answers[q["field"]] = value
+    state.setdefault("_history", []).append(q["field"])   # so "go back" can undo this answer
 
     notices = []                               # contextual guidance shown before the next question
     f = q["field"]
@@ -286,11 +338,18 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     if f == "has_mycra" and value == "Yes":                                  # §2A add Rep ID
         notices.append(i18n.localize(REP_ID_INSTRUCTION, lang))
     if f == "landed_2024" and value == "Yes":                                # §2B world income
-        notices.append(i18n.localize(WORLD_INCOME, lang))
+        # Translate the guidance, keep the official links verbatim (URLs must not be altered).
+        notices.append(i18n.localize(WORLD_INCOME, lang) + "\n\n" + NEWCOMER_LINKS)
+    if f == "spouse_in_canada" and value == "No":                            # spouse abroad
+        notices.append(SPOUSE_ABROAD_LINKS)
+    if f == "is_gig" and value == "Yes":                                     # rideshare/delivery
+        notices.append(RIDESHARE_LINKS)
+    if f == "first_home" and value == "Yes":                                 # first-time home buyer
+        notices.append(HOME_BUYER_LINKS)
 
     extra = "\n\n".join(notices)
     nxt = get_next_question(answers)
     if nxt is None:                           # last answer → estimate + thank-you + KB link
         state["_done"] = True
         return _done_message(answers, lang), True
-    return (f"{extra}\n\n{_render(nxt, lang)}" if extra else _render(nxt, lang)), False
+    return (f"{extra}\n\n{_render(nxt, lang, answers)}" if extra else _render(nxt, lang, answers)), False

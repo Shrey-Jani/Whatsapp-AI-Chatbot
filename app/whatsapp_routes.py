@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from sqlalchemy import select
 
@@ -7,6 +9,7 @@ from .database import Session
 from .models import ChatSession, Escalation, Tenant
 from .whatsapp import download_media, send_document, send_text, upload_media, verify_signature
 
+log = logging.getLogger("taxbot")
 router = APIRouter()
 
 MEDIA_TYPES = ("image", "document", "audio", "video")
@@ -37,7 +40,11 @@ async def _handle(payload: dict):
             value = change.get("value", {})
             pnid = value.get("metadata", {}).get("phone_number_id")
             for msg in value.get("messages", []):  # absent for status receipts
-                await _process(pnid, msg)
+                try:
+                    await _process(pnid, msg)
+                except Exception:
+                    # One bad message must not sink the rest of the webhook batch.
+                    log.exception("WhatsApp message processing failed (from %s)", msg.get("from"))
 
 
 def _operator(tenant) -> str | None:

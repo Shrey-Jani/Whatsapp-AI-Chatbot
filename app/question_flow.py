@@ -74,7 +74,31 @@ WORLD_INCOME = ("As you're new to Canada, we've noted your calendar year of land
                 "you are legally required to report your preceding worldwide income in Canadian "
                 "dollars (CAD) — please call the CRA directly to report it.")            # §2 B
 
-# ---------------------------------------------------------------- router
+# Official government reference links, surfaced at the relevant moment. Edit these in one place;
+# VERIFY the exact URLs before launch — government paths change over time.
+NEWCOMER_LINKS = ("Helpful official resources:\n"
+                  "• IRCC — Immigration & citizenship: "
+                  "https://www.canada.ca/en/services/immigration-citizenship.html\n"
+                  "• CRA — Newcomers to Canada (taxes): "
+                  "https://www.canada.ca/en/revenue-agency/services/tax/international-non-residents"
+                  "/individuals-leaving-entering-canada-non-residents/newcomers-canada-immigrants.html")
+
+SPOUSE_ABROAD_LINKS = ("Helpful resource for a spouse living outside Canada:\n"
+                       "• IRCC — Sponsor your spouse or partner: "
+                       "https://www.canada.ca/en/immigration-refugees-citizenship/services/"
+                       "immigrate-canada/family-sponsorship.html")
+
+RIDESHARE_LINKS = ("Helpful resource for rideshare/delivery income:\n"
+                   "• CRA — GST/HST and ride-sharing: "
+                   "https://www.canada.ca/en/revenue-agency/campaigns/ride-sharing.html")
+
+HOME_BUYER_LINKS = ("Helpful resource for first-time home buyers:\n"
+                    "• CRA — First-time home buyers' tax credit (Home Buyers' Amount): "
+                    "https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/"
+                    "about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-"
+                    "expenses/line-31270-home-buyers-amount.html")
+
+#  router
 # Asked first, for everyone — before the tax-type router.
 CUSTOMER_Q = {"id": -1, "field": "customer_status", "type": "select",
               "options": ["New Customer", "Existing Customer"],
@@ -86,7 +110,7 @@ SERVICE_Q = {"id": 0, "field": "service_type", "type": "select",
              "prompt": "What type of tax would you like to file for?",
              "ai_parse": "Map to one of: Personal Tax, Corporate Tax, GST/HST, Business Registration."}
 
-# ---------------------------------------------------------------- Personal (Type-1)
+# Personal (Type-1)
 PERSONAL = [
     # Existing customers are matched by SIN up front, so we can pre-fill their profile from
     # their last filing. New customers get the SIN at its normal spot below.
@@ -302,7 +326,7 @@ PERSONAL = [
      "prompt": "Any other income, deductions, or notes? (Type 'none' if nothing.)",
      "ai_parse": "Return the note, or 'none'."},
     {"id": 54, "field": "confirmation", "type": "text",
-     "prompt": "Please review your answers. Type YES to confirm everything is accurate.",
+     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -353,7 +377,7 @@ CORPORATE = [
      "prompt": "Any other notes for the corporate filing? (Type 'none' if nothing.)",
      "ai_parse": "Return the note, or 'none'."},
     {"id": 116, "field": "confirmation", "type": "text",
-     "prompt": "Please review your answers. Type YES to confirm everything is accurate.",
+     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -392,7 +416,7 @@ GST = [
     {"id": 211, "field": "additional_notes", "type": "textarea",
      "prompt": "Any other notes? (Type 'none' if nothing.)", "ai_parse": "Return the note, or 'none'."},
     {"id": 212, "field": "confirmation", "type": "text",
-     "prompt": "Please review your answers. Type YES to confirm everything is accurate.",
+     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -436,7 +460,7 @@ REGISTRATION = [
     {"id": 311, "field": "additional_notes", "type": "textarea",
      "prompt": "Any other notes? (Type 'none' if nothing.)", "ai_parse": "Return the note, or 'none'."},
     {"id": 312, "field": "confirmation", "type": "text",
-     "prompt": "Please review your answers. Type YES to confirm everything is accurate.",
+     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 

@@ -9,7 +9,10 @@
 <body>
   <div class="chat">
     <header>Tax Assistant
-      <button id="staff" class="staff-btn" type="button">Speak with Staff</button>
+      <span class="head-btns">
+        <button id="back" class="staff-btn" type="button">↩ Back</button>
+        <button id="staff" class="staff-btn" type="button">Speak with Staff</button>
+      </span>
     </header>
     <div id="log" class="log"></div>
     <form id="f" class="composer">
@@ -23,27 +26,43 @@
   <script>
     const sid = "web-" + Math.random().toString(36).slice(2);
     const log = document.getElementById("log");
+    function linkify(text) {
+      // Escape HTML first (XSS-safe), then turn URLs into clickable links.
+      const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return esc.replace(/(https?:\/\/[^\s]+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
     function add(text, who) {
       const d = document.createElement("div");
       d.className = "msg " + who;
-      d.textContent = text;
+      d.innerHTML = linkify(text);        // renders URLs as clickable <a> links
       log.appendChild(d);
       log.scrollTop = log.scrollHeight;
     }
     async function send(message) {
-      const r = await fetch("/api/chat", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({session_id: sid, message})
-      });
-      add((await r.json()).reply, "bot");
+      try {
+        const r = await fetch("/api/chat", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({session_id: sid, message})
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        add((await r.json()).reply, "bot");
+      } catch (e) {
+        add("⚠️ Something went wrong — please try again.", "bot");
+      }
     }
     async function uploadFile(file) {
       add(`📎 ${file.name}`, "me");
-      const fd = new FormData();
-      fd.append("session_id", sid);
-      fd.append("file", file);
-      const r = await fetch("/api/upload", {method: "POST", body: fd});
-      add((await r.json()).reply, "bot");
+      try {
+        const fd = new FormData();
+        fd.append("session_id", sid);
+        fd.append("file", file);
+        const r = await fetch("/api/upload", {method: "POST", body: fd});
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        add((await r.json()).reply, "bot");
+      } catch (e) {
+        add("⚠️ Couldn't upload that file — please try again.", "bot");
+      }
     }
     document.getElementById("f").addEventListener("submit", e => {
       e.preventDefault();
@@ -61,6 +80,10 @@
     document.getElementById("staff").addEventListener("click", () => {
       add("Speak with Staff", "me");
       send("agent");                     // triggers escalation on the server
+    });
+    document.getElementById("back").addEventListener("click", () => {
+      add("↩ Back", "me");
+      send("go back");                   // undoes the last answer on the server
     });
     // Client-side hint only — the user's own first message is what detects their language,
     // so we must NOT auto-send anything here.

@@ -11,10 +11,12 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Supabase (Postgres + Storage)
+    # Supabase (Postgres only — files are stored on local disk, see storage_dir)
     database_url: str = "postgresql+asyncpg://user:pass@host:5432/postgres"
-    supabase_url: str = ""
-    supabase_service_key: str = ""
+
+    # Uploaded slips are written here on the host's disk. Use an absolute path in prod
+    # (a persistent volume). On ephemeral hosts the disk is wiped on restart.
+    storage_dir: str = "uploaded_files"
 
     # WhatsApp — Meta Cloud API (app-level; per-firm token lives on the Tenant row)
     verify_token: str = "changeme"

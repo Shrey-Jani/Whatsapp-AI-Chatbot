@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import pdf_generator
+from . import pdf_generator, storage
 from .config import settings
 from .database import get_db
 from .models import Client, Document, Escalation, Submission
@@ -46,10 +46,20 @@ async def submission_detail(submission_id: int, db: AsyncSession = Depends(get_d
             "full_name": client.full_name, "phone": client.phone, "email": client.email,
             "sin": reveal_sin(client.sin), "dob": client.dob, "address": client.address,
             "marital_status": client.marital_status},
-        # Files aren't stored (no cloud storage) — this is the parsed metadata only.
-        "documents": [{"filename": d.filename, "slip_type": d.slip_type,
-                       "employer": d.employer_name, "income": d.income_amount} for d in docs],
+        "documents": [{"id": d.id, "filename": d.filename, "slip_type": d.slip_type,
+                       "employer": d.employer_name, "income": d.income_amount,
+                       "has_file": storage.exists(d.storage_path)} for d in docs],
     }
+
+
+@router.get("/documents/{doc_id}/download")
+async def download_doc(doc_id: int, db: AsyncSession = Depends(get_db)):
+    d = await db.get(Document, doc_id)
+    if d is None or not storage.exists(d.storage_path):
+        raise HTTPException(404, "not found")
+    return Response(content=storage.load(d.storage_path),
+                    media_type=d.file_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{d.filename}"'})
 
 
 @router.put("/submissions/{submission_id}")
