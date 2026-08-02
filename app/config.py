@@ -11,12 +11,16 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Supabase (Postgres only — files are stored on local disk, see storage_dir)
+    # Supabase — Postgres only (files go to local disk or R2, see storage_backend)
     database_url: str = "postgresql+asyncpg://user:pass@host:5432/postgres"
 
-    # Uploaded slips are written here on the host's disk. Use an absolute path in prod
-    # (a persistent volume). On ephemeral hosts the disk is wiped on restart.
-    storage_dir: str = "uploaded_files"
+    # File storage: "local" (disk, needs a persistent volume) or "r2" (Cloudflare R2).
+    storage_backend: str = "local"          # local | r2
+    storage_dir: str = "uploaded_files"     # local backend: where slips are written
+    r2_account_id: str = ""                 # r2 backend: from the Cloudflare dashboard
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = "taxbot-docs"
 
     # WhatsApp — Meta Cloud API (app-level; per-firm token lives on the Tenant row)
     verify_token: str = "changeme"

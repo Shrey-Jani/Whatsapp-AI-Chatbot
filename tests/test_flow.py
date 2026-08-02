@@ -93,6 +93,19 @@ def test_code_field_rejects_non_answer():
     assert validate_answer("none", q)[0]                 # sentinel for "not set up"
 
 
+def test_allowed_literal_preserved_over_llm():
+    # A literal the ai_parse quotes (No / unknown / none) must be returned verbatim,
+    # never sent to the LLM — which was turning "No" into an empty value and looping.
+    from app.chat_engine import parse_answer
+    q_no = {"type": "text", "check": "date_or_no", "ai_parse": "Departure date DD/MM/YYYY, or 'No'."}
+    assert parse_answer("No", q_no)["value"] == "No"
+    assert parse_answer("no", q_no)["value"].lower() == "no"
+    q_unknown = {"type": "text", "ai_parse": "Extract the figure, or 'unknown'."}
+    assert parse_answer("unknown", q_unknown)["value"] == "unknown"
+    q_none = {"type": "text", "check": "code", "ai_parse": "Extract the GST number or 'none'."}
+    assert parse_answer("none", q_none)["value"] == "none"
+
+
 def test_date_or_no_check():
     q = {"type": "text", "check": "date_or_no"}
     assert validate_answer("No", q)[0]                     # legit 'No'
@@ -116,6 +129,40 @@ def test_date_year_constraint():
     assert validate_answer("15/06/2024", q)[0]
     assert not validate_answer("15/06/2022", q)[0]
     assert not validate_answer("15/06/2025", q)[0]
+
+
+def test_edit_field_at_review(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    # a completed-except-confirmation state (confirmation is the current question)
+    state = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
+             "phone": "4160001234", "email": "old@x.com", "sin": "046454286", "sin_document": "skip",
+             "dob": "01/01/1990", "address": "1 St", "age": "35", "landed_2024": "No",
+             "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
+             "income_slips": "skip", "has_tuition": "No", "is_gig": "No", "owns_rental": "No",
+             "first_home": "No", "has_medical": "No", "has_donations": "No", "rent_paid_2025": "0",
+             "province_changed": "No", "left_canada_date": "No", "student_completion_date": "No",
+             "additional_notes": "none", "last_refund": "unknown", "third_party_payer": "No"}
+    assert ce.get_next_question(state)["field"] == "confirmation"
+    reply, done = ce.advance(state, "change my email")
+    assert "email" not in state          # email was cleared for re-entry
+    assert not done
+    assert "email" in reply.lower()      # the email question is re-asked
+
+
+def test_go_back_re_asks_previous_question(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    # answer New/Existing, then service type; then "go back" should undo service_type and re-ask it
+    state = {}
+    ce.advance(state, None)                       # asks customer_status
+    ce.advance(state, "New Customer")             # answered → asks service_type
+    ce.advance(state, "GST/HST")                  # answered service_type
+    assert state.get("service_type") == "GST/HST"
+    reply, done = ce.advance(state, "sorry wrong choice")
+    assert "service_type" not in state            # the last answer was undone
+    assert "type of tax" in reply.lower()         # service_type question re-asked
+    assert not done
 
 
 def test_manual_escalation():
@@ -165,6 +212,21 @@ def test_newcomer_gets_world_income_notice(monkeypatch):
     state = dict(CORE, address="1 St", age="35")   # landed_2024 is the next question
     reply, _ = ce.advance(state, "Yes")            # landed in Canada in 2024
     assert "worldwide income" in reply.lower()
+    assert "canada.ca" in reply                    # official IRCC/CRA links attached
+
+
+def test_first_home_buyer_gets_cra_link(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    # answers so that first_home is the next unanswered question
+    state = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
+             "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
+             "dob": "01/01/1990", "address": "1 St", "age": "35", "landed_2024": "No",
+             "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
+             "income_slips": "skip", "has_tuition": "No", "is_gig": "No", "owns_rental": "No"}
+    assert ce.get_next_question(state)["field"] == "first_home"
+    reply, _ = ce.advance(state, "Yes")            # first-time home buyer
+    assert "canada.ca" in reply
 
 
 def test_incorporation_shows_etransfer_directive(monkeypatch):
