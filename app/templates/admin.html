@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Admin — Tax Assistant</title>
+  <title>Admin - Tax Assistant</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -81,8 +81,8 @@
       const body = document.querySelector("#sub tbody");
       body.innerHTML = rows.map(r => `
         <tr>
-          <td>${r.client_name ?? "—"}</td>
-          <td>${r.phone ?? "—"}</td>
+          <td>${r.client_name ?? "-"}</td>
+          <td>${r.phone ?? "-"}</td>
           <td>${(r.date || "").slice(0, 10)}</td>
           <td>
             <select onchange="updateStatus(${r.id}, this.value)">
@@ -109,10 +109,10 @@
     async function view(id) {
       const d = await (await api(`/api/admin/submissions/${id}`)).json();
       const kv = o => Object.entries(o).map(([k, v]) =>
-        `<tr><th>${k.replace(/_/g, " ")}</th><td>${v ?? "—"}</td></tr>`).join("");
+        `<tr><th>${k.replace(/_/g, " ")}</th><td>${v ?? "-"}</td></tr>`).join("");
       const docs = d.documents.length
         ? `<table>${d.documents.map(x =>
-            `<tr><td>${x.slip_type ?? "—"}</td><td>${x.employer ?? "—"}</td>` +
+            `<tr><td>${x.slip_type ?? "-"}</td><td>${x.employer ?? "-"}</td>` +
             `<td>${x.has_file
                      ? `<a href="#" onclick="downloadDoc(${x.id},'${x.filename}');return false;">${x.filename}</a>`
                      : x.filename}</td></tr>`).join("")}</table>`
@@ -120,7 +120,7 @@
       document.getElementById("modalBody").innerHTML =
         `<h2>Client Details</h2><table>${kv(d.client)}</table>
          <h3>Documents (click a filename to download)</h3>${docs}
-         <h3>Notes</h3><p>${d.admin_notes ?? "—"}</p>`;
+         <h3>Notes</h3><p>${d.admin_notes ?? "-"}</p>`;
       document.getElementById("modal").hidden = false;
     }
     function closeModal() { document.getElementById("modal").hidden = true; }

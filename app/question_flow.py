@@ -1,4 +1,4 @@
-"""Intake flows as data — one router question + four workflows.
+"""Intake flows as data - one router question + four workflows.
 
 Each question dict may carry:
   id/field/prompt/type/options/check/year/min/max/condition/ai_parse  (see engine)
@@ -8,7 +8,7 @@ Each question dict may carry:
             matches the chosen service_type.
 
 condition is a real Python callable, NOT an eval'd string. Displayed pricing / legal warnings
-are intentionally NOT here (collection only) — they land in the pricing phase.
+are intentionally NOT here (collection only) - they land in the pricing phase.
 """
 
 
@@ -41,14 +41,21 @@ NOT_SINGLE = lambda a: a.get("marital_status") != "Single"                      
 SPOUSE_LEFT = lambda a: MARRIED(a) and _left_canada(a)                             # noqa: E731
 FILED_Q = lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") != "Yes"  # noqa: E731
 
-# Mandated verbatim legal text (spec §4) — shown before GST filing and on the mandatory-GST flag.
+# Mandated verbatim legal text (spec §4) - shown before GST filing and on the mandatory-GST flag.
 GST_WARNING = ("Warning: Failure to file your required GST returns will prompt the CRA to "
                "withhold your personal tax refunds. Additionally, the CRA reserves the right to "
                "arbitrarily calculate and establish a GST balance owing by estimating figures "
                "directly from your baseline bank account statement history.")
 
-# Rideshare/delivery platforms — operating on 2+ makes a GST number mandatory (spec §4).
+# Rideshare/delivery platforms - operating on 2+ makes a GST number mandatory (spec §4).
 RIDESHARE_PLATFORMS = ("uber", "lyft", "doordash", "skip", "instacart")
+
+# Shown when a client reports gig income - which platform reports to collect.
+GIG_SUMMARY_GUIDANCE = (
+    "If you worked with Uber, Skip, DoorDash, Instacart, Hopp, or any other ride-share or courier "
+    "delivery platform, please send your Annual Tax Summary for each platform.\n\n"
+    "Exception: For Lyft, please send your Quarterly Tax Summaries, as we require the quarterly "
+    "reports instead of the annual summary.")
 
 # Guidance messages (spec §3-6). Mandated/verbatim ones are NOT translated; helpful ones are.
 CRA_HELPLINE = ("Please contact the CRA corporate helpline directly at 1-800-959-5525, "
@@ -59,56 +66,78 @@ ETRANSFER_DIRECTIVE = ("You must successfully submit the complete fee amount via
 PROCUREMENT_SLA = ("Same-day acquisition of your GST number is targeted via automated routing. "
                    "If manual filing exceptions occur, processing via official form submissions "
                    "can take 2 to 3 weeks.")                                              # §4
-MOVING_CHECKLIST = ("Since you changed provinces, you may be able to claim moving expenses — keep "
-                    "receipts for: transportation & storage of household goods; travel (mileage, "
-                    "meals, lodging) during the move; temporary lodging near the new home; "
-                    "lease-cancellation costs; and incidentals (address changes, utility "
-                    "hook-ups). We'll help you claim the eligible amounts.")              # §3
+RENT_NO_PROOF_GUIDANCE = (                                                       # §3 rent, correct year
+    "We do not require rent receipts or landlord details to prepare and file your tax return. "
+    "The total amount of rent you paid in {year} is sufficient for tax filing.\n\n"
+    "However, the CRA may ask you to provide proof of rent paid (rent receipts or landlord "
+    "information) at a later date for verification. If you cannot provide it, the CRA may deny "
+    "the rent claim and ask you to repay any related benefits, such as the Ontario Trillium "
+    "Benefit, if applicable.")
+MOVING_CHECKLIST = ("Since you changed provinces, you may be able to claim moving expenses. "
+                    "Keep receipts for:\n\n"
+                    "- Transportation & storage of household goods\n"
+                    "- Travel (mileage, meals, lodging) during the move\n"
+                    "- Temporary lodging near the new home\n"
+                    "- Lease-cancellation costs\n"
+                    "- Incidentals (address changes, utility hook-ups)\n\n"
+                    "We'll help you claim the eligible amounts.")                         # §3
 
-# §2 CRA Access Authorization guidance.
-REP_ID_INSTRUCTION = ("To secure direct CRA access, please add our firm's Representative ID to "
-                      "your CRA My Account, set to Access Level 2 with No Expiry. This lets us "
-                      "preemptively avoid reassessments or unexpected penalties. We'll share our "
-                      "Representative ID with you.")                                      # §2 A
+# How to get a GST/HST NetFile Access Code - shown to gig drivers who have a GST account.
+GIG_GST_NETFILE_HELP = (
+    "How to get your GST/HST NetFile Access Code:\n"
+    "- Send us your previous GST/HST Return (the access code is on it).\n"
+    "- If you can't find it, call the CRA Business Enquiries line at 1-800-959-5525, press 4 for GST.")
+
+# Tax Return Review & Authorization - shown at completion, before payment. Legal text (verbatim).
+AUTHORIZATION_MSG = (
+    "Tax Return Review & Authorization\n\n"
+    "Once your tax return is prepared, we will send you:\n"
+    "- Your Tax Summary for review.\n"
+    "- An electronic signature request.\n\n"
+    "Please review your Tax Summary carefully before signing.\n\n"
+    "By signing, you confirm that:\n"
+    "- You have reviewed your Tax Summary.\n"
+    "- The information provided is complete and accurate to the best of your knowledge.\n"
+    "- You authorize us to submit your tax return to the CRA.\n\n"
+    "Please note: We will not submit your tax return until we receive your signed authorization.")
+
+# §2 CRA Access Authorization guidance. {year} = filing year, {next_year} = year credits carry to.
+REP_AUTH_GUIDANCE = (
+    "Do you have an active CRA My Account?\n\n"
+    "If yes:\n"
+    "Please add our Level 2 Authorized Representative by following these steps:\n\n"
+    "1. Log in to your CRA My Account.\n"
+    "2. Go to Profile.\n"
+    "3. Select Authorized Representative.\n"
+    "4. Choose Add a Representative.\n"
+    "5. Enter our Representative ID.\n"
+    "6. Grant us Level 2 authorization and submit.\n\n"
+    "This will allow us to:\n\n"
+    "- Check whether you have any {next_year} tuition credits available.\n"
+    "- Review tax slips submitted by your employer, bank, college, or other institutions.\n"
+    "- Help ensure all available information is included in your tax return, reducing the chances "
+    "of a future CRA reassessment.\n\n"
+    "If you do not have a CRA My Account:\n"
+    "Please send us your {year} Notice of Assessment (NOA) or your {year} Tax Summary. We will "
+    "check whether you have any tuition credits carried forward to {next_year}.\n\n"
+    "If you worked using your SIN and had income tax deducted, claiming available tuition credits "
+    "may help increase your tax refund.")                                                # §2 A
 WORLD_INCOME = ("As you're new to Canada, we've noted your calendar year of landing. Please note: "
                 "you are legally required to report your preceding worldwide income in Canadian "
-                "dollars (CAD) — please call the CRA directly to report it.")            # §2 B
-
-# Official government reference links, surfaced at the relevant moment. Edit these in one place;
-# VERIFY the exact URLs before launch — government paths change over time.
-NEWCOMER_LINKS = ("Helpful official resources:\n"
-                  "• IRCC — Immigration & citizenship: "
-                  "https://www.canada.ca/en/services/immigration-citizenship.html\n"
-                  "• CRA — Newcomers to Canada (taxes): "
-                  "https://www.canada.ca/en/revenue-agency/services/tax/international-non-residents"
-                  "/individuals-leaving-entering-canada-non-residents/newcomers-canada-immigrants.html")
-
-SPOUSE_ABROAD_LINKS = ("Helpful resource for a spouse living outside Canada:\n"
-                       "• IRCC — Sponsor your spouse or partner: "
-                       "https://www.canada.ca/en/immigration-refugees-citizenship/services/"
-                       "immigrate-canada/family-sponsorship.html")
-
-RIDESHARE_LINKS = ("Helpful resource for rideshare/delivery income:\n"
-                   "• CRA — GST/HST and ride-sharing: "
-                   "https://www.canada.ca/en/revenue-agency/campaigns/ride-sharing.html")
-
-HOME_BUYER_LINKS = ("Helpful resource for first-time home buyers:\n"
-                    "• CRA — First-time home buyers' tax credit (Home Buyers' Amount): "
-                    "https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/"
-                    "about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-"
-                    "expenses/line-31270-home-buyers-amount.html")
+                "dollars (CAD) - please call the CRA directly to report it.")            # §2 B
 
 #  router
-# Asked first, for everyone — before the tax-type router.
+# Asked first, for everyone - before the tax-type router.
 CUSTOMER_Q = {"id": -1, "field": "customer_status", "type": "select",
               "options": ["New Customer", "Existing Customer"],
               "prompt": "Are you a New Customer or an Existing Customer?",
               "ai_parse": "Map to exactly 'New Customer' or 'Existing Customer'."}
 
 SERVICE_Q = {"id": 0, "field": "service_type", "type": "select",
-             "options": ["Personal Tax", "Corporate Tax", "GST/HST", "Business Registration"],
+             "options": ["Personal Tax", "Corporate Tax", "GST/HST", "Business Registration", "Others"],
              "prompt": "What type of tax would you like to file for?",
-             "ai_parse": "Map to one of: Personal Tax, Corporate Tax, GST/HST, Business Registration."}
+             "ai_parse": ("Map to one of: Personal Tax, Corporate Tax, GST/HST, "
+                          "Business Registration, Others.")}
 
 # Personal (Type-1)
 PERSONAL = [
@@ -119,7 +148,7 @@ PERSONAL = [
      "prompt": "Welcome back! Please enter your SIN (9 digits) so we can pull up your file.",
      "ai_parse": "Extract a 9-digit SIN; digits only, no spaces or dashes."},
 
-    # Shown only to returning customers matched by SIN — confirm the pulled profile.
+    # Shown only to returning customers matched by SIN - confirm the pulled profile.
     {"id": 2, "field": "details_ok", "type": "boolean",
      "options": ["Yes, all correct", "No, update my details"],
      "condition": lambda a: a.get("profile_prefilled") == "yes",
@@ -143,12 +172,12 @@ PERSONAL = [
     {"id": 5.5, "field": "sin_document", "type": "file",
      "prompt": "Please upload a photo or PDF of your SIN document with 📎, "
                "then type 'done' (or type 'skip' if you don't have it handy).",
-     "ai_parse": "File upload — handled separately."},
+     "ai_parse": "File upload - handled separately."},
 
     {"id": 6, "field": "dob", "type": "date", "prompt": "Your date of birth (DD/MM/YYYY)?",
      "ai_parse": "Extract the DOB strictly as DD/MM/YYYY."},
 
-    {"id": 7, "field": "address", "type": "textarea",
+    {"id": 7, "field": "address", "type": "textarea", "check": "postal",
      "prompt": "Your complete residential address (including postal code)?",
      "ai_parse": "Extract the full mailing address as a single line."},
 
@@ -156,13 +185,13 @@ PERSONAL = [
      "prompt": "What is your age?",
      "ai_parse": "Extract the person's age as a whole number."},
 
-    # Landing in Canada — asked before marital status.
+    # Landing in Canada - asked before marital status.
     {"id": 22, "field": "landed_2024", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Did you land / arrive in Canada in 2024?", "ai_parse": "Return Yes or No."},
     {"id": 23, "field": "landing_date", "type": "date", "year": 2024, "condition": YES("landed_2024"),
      "prompt": "Your exact landing date in Canada in 2024 (DD/MM/YYYY)?", "ai_parse": "Landing date DD/MM/YYYY."},
 
-    # §2 CRA Access Authorization — new-to-firm clients residing in Canada (not brand-new arrivals).
+    # §2 CRA Access Authorization - new-to-firm clients residing in Canada (not brand-new arrivals).
     {"id": 23.3, "field": "has_mycra", "type": "boolean", "options": ["Yes", "No"],
      "condition": lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") == "No",
      "prompt": "Do you have an active myCRA (CRA My Account) online account?",
@@ -170,14 +199,14 @@ PERSONAL = [
 
     {"id": 23.6, "field": "noa_method", "type": "select",
      "condition": lambda a: a.get("has_mycra") == "No",
-     "options": ["Digital download (free)", "CRA phone request (free)", "Have us obtain it ($75)"],
-     "prompt": "Since you don't have a myCRA account, we'll need your Notice of Assessment (NoA) "
-               "from last year, plus a summary of any credits to carry forward. There are three "
-               "ways to get your NoA — how would you like to proceed?\n"
-               "• Digital download — log into your CRA account and fetch it instantly (free)\n"
-               "• CRA phone request — call 1-800-959-8281 for a copy by mail/email (free)\n"
-               "• Have us obtain it — we pull and process it for you ($75 per NoA)",
-     "ai_parse": "Map to one of: Digital download (free), CRA phone request (free), Have us obtain it ($75)."},
+     "options": ["CRA My Account (free)", "Call CRA (free)", "Have us obtain it ($80)"],
+     "prompt": "We'll need your Notice of Assessment (NOA). There are 3 ways to get it - how would "
+               "you like to proceed?\n"
+               "• CRA My Account - if you have one, log in and download your NOA instantly (free)\n"
+               "• Call CRA - call 1-800-959-8281 and request a copy; CRA will mail it to your "
+               "address on file (free)\n"
+               "• Have us obtain it - we can obtain your NOA on your behalf ($80 per NOA)",
+     "ai_parse": "Map to one of: CRA My Account (free), Call CRA (free), Have us obtain it ($80)."},
 
     {"id": 8, "field": "marital_status", "type": "select",
      "options": ["Single", "Married", "Common-Law", "Divorced", "Separated", "Widowed"],
@@ -213,7 +242,7 @@ PERSONAL = [
      "condition": NOT_SINGLE, "prompt": "Do you have any children or dependents?",
      "ai_parse": "Return Yes or No."},
     {"id": 21, "field": "children_details", "type": "textarea", "condition": YES("has_children"),
-     "prompt": "List EACH child/dependent — full name, DOB (DD/MM/YYYY), and SIN if available "
+     "prompt": "List EACH child/dependent - full name, DOB (DD/MM/YYYY), and SIN if available "
                "(SIN optional). Include children whether or not they live with you.",
      "ai_parse": "Return the child/dependent details as given."},
 
@@ -222,24 +251,26 @@ PERSONAL = [
      "ai_parse": "Return Yes or No."},
 
     {"id": 25, "field": "income_slips", "type": "file",
-     "preamble": "If you leave out or forget to attach any tax slip, do not worry. "
-                 "Your tax profile is safe; the Canada Revenue Agency (CRA) will "
-                 "automatically attach missing slips on their end during processing.",
-     "prompt": "Please upload ALL your income slips — several at once is fine (multiple T4s, "
-               "plus any T4A, T5, T2202A). Tap 📎, select every slip (photo or PDF), then type "
-               "'done'. Type 'skip' if you have none.",
-     "ai_parse": "Not parsed by AI — file upload handled separately."},
-
-    {"id": 26, "field": "has_tuition", "type": "boolean", "options": ["Yes", "No"],
-     "prompt": "Do you have tuition (T2202A) slips to claim? (students)", "ai_parse": "Return Yes or No."},
-    {"id": 27, "field": "tuition_osap", "type": "boolean", "options": ["Yes", "No"],
-     "condition": YES("has_tuition"), "prompt": "Do you have OSAP funding (T4A) slips to include?",
-     "ai_parse": "Return Yes or No."},
-    {"id": 28, "field": "graduation_2025", "type": "boolean", "options": ["Yes", "No"],
-     "condition": YES("has_tuition"), "prompt": "Did you complete/graduate your studies during 2025?",
-     "ai_parse": "Return Yes or No."},
-    {"id": 29, "field": "graduation_date", "type": "date", "condition": YES("graduation_2025"),
-     "prompt": "Your exact date of completion (DD/MM/YYYY)?", "ai_parse": "Completion date DD/MM/YYYY."},
+     "preamble": "Don't have all of your tax slips yet? That's okay.\n\n"
+                 "You can still file your tax return even if you don't have every tax slip "
+                 "available at the time of filing.\n\n"
+                 "However, if any missing slips are later reported to the CRA by your employer, "
+                 "bank, college, or another institution, the CRA may issue a Notice of "
+                 "Reassessment. This could result in:\n\n"
+                 "- An increase or decrease in your tax refund.\n"
+                 "- An amount owing if additional income is reported.\n"
+                 "- Changes to your government benefits and credits.\n\n"
+                 "We recommend sharing all available tax slips with us before filing whenever "
+                 "possible, but you can still proceed with your tax return if some slips are not "
+                 "yet available.",
+     "prompt": "Please upload ALL your slips - several at once is fine. Include income slips "
+               "(T4, T4A, T5, T2202A) and any province-specific slips. Tap 📎, select every file "
+               "(photo or PDF), then type 'done'. Type 'skip' if you have none.\n\n"
+               "If you have any documents to share other than your income slips, please send them "
+               "as well. These may include documents related to medical expenses, rent, childcare, "
+               "RRSP contributions, moving expenses, or any other information that may be relevant "
+               "to your tax return.",
+     "ai_parse": "Not parsed by AI - file upload handled separately."},
 
     {"id": 30, "field": "is_gig", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Do you earn rideshare/delivery income (Uber, Lyft, DoorDash, SkipTheDishes, "
@@ -250,11 +281,18 @@ PERSONAL = [
     {"id": 32, "field": "gig_cash", "type": "text", "condition": YES("is_gig"),
      "prompt": "If you earn cash directly or lack structured reports, enter your estimated total "
                "from annual bank statements (else 'No').", "ai_parse": "Cash total, or 'No'."},
+    {"id": 32.5, "field": "gig_has_gst", "type": "boolean", "options": ["Yes", "No"],
+     "condition": YES("is_gig"),
+     "prompt": "Do you have a GST/HST account registered with CRA?", "ai_parse": "Return Yes or No."},
+    {"id": 32.6, "field": "gig_netfile", "type": "text", "condition": YES("gig_has_gst"),
+     "prompt": "Please share your GST/HST NetFile Access Code (if available), or reply 'skip'.",
+     "ai_parse": "Extract the NetFile access code, or 'skip'."},
 
     {"id": 33, "field": "owns_rental", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Do you own any real estate that generates RENTAL income?", "ai_parse": "Return Yes or No."},
-    {"id": 34, "field": "rental_address", "type": "text", "condition": YES("owns_rental"),
-     "prompt": "Rental property — complete physical address?", "ai_parse": "Extract the rental address."},
+    {"id": 34, "field": "rental_address", "type": "text", "check": "postal", "condition": YES("owns_rental"),
+     "prompt": "Rental property - complete physical address (including postal code)?",
+     "ai_parse": "Extract the rental address."},
     {"id": 35, "field": "rental_gross_income", "type": "number", "min": 0, "condition": YES("owns_rental"),
      "prompt": "Gross annual rental revenue received?", "ai_parse": "Gross rental revenue as a number."},
     {"id": 36, "field": "rental_mortgage_interest", "type": "number", "min": 0, "condition": YES("owns_rental"),
@@ -269,7 +307,7 @@ PERSONAL = [
      "ai_parse": "Map to 'Alone' or 'Partnership'."},
     {"id": 40, "field": "rental_partners", "type": "textarea",
      "condition": lambda a: a.get("owns_rental") == "Yes" and a.get("rental_ownership") == "Partnership",
-     "prompt": "For EACH partner — name, address, SIN, contact info, and ownership percentage?",
+     "prompt": "For EACH partner - name, address, SIN, contact info, and ownership percentage?",
      "ai_parse": "Return the partner details as given."},
 
     {"id": 41, "field": "first_home", "type": "boolean", "options": ["Yes", "No"],
@@ -282,7 +320,7 @@ PERSONAL = [
     {"id": 43, "field": "has_medical", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Do you have prescribed medical expenses to claim?", "ai_parse": "Return Yes or No."},
     {"id": 44, "field": "medical_details", "type": "textarea", "condition": YES("has_medical"),
-     "prompt": "For each medical expense — total amount paid, date, and the doctor's/clinic's name?",
+     "prompt": "For each medical expense - total amount paid, date, and the doctor's/clinic's name?",
      "ai_parse": "Return the medical expense details."},
 
     {"id": 45, "field": "has_donations", "type": "boolean", "options": ["Yes", "No"],
@@ -291,17 +329,86 @@ PERSONAL = [
      "prompt": "Please upload your donation receipts with 📎, and enter the total donated here.",
      "ai_parse": "Extract the total donation amount."},
 
+    # Gym / physical-activity expenses (eligibility depends on province of residence).
+    {"id": 45.3, "field": "has_gym", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Did you pay for any gym membership, fitness program, or other physical activity "
+               "expenses during {year}?", "ai_parse": "Return Yes or No."},
+    {"id": 45.31, "field": "gym_province", "type": "text", "condition": YES("has_gym"),
+     "prompt": "Which province or territory did you live in on December 31, {year}?",
+     "ai_parse": "Extract the province/territory."},
+    {"id": 45.32, "field": "gym_amount", "type": "number", "min": 0, "condition": YES("has_gym"),
+     "prompt": "Total amount paid for gym/fitness/physical activity?", "ai_parse": "Amount as a number."},
+    {"id": 45.33, "field": "gym_receipt", "type": "file", "condition": YES("has_gym"),
+     "prompt": "Please upload your gym/fitness receipt(s) or invoice(s) with 📎, then 'done' "
+               "(or 'skip' if you don't have them).", "ai_parse": "File upload - handled separately."},
+
+    # Child care expenses.
+    {"id": 45.4, "field": "has_childcare", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Did you pay any child care expenses during {year}? (daycare, nursery, preschool, "
+               "babysitting, day camp, before/after-school care)", "ai_parse": "Return Yes or No."},
+    {"id": 45.41, "field": "childcare_details", "type": "textarea", "condition": YES("has_childcare"),
+     "prompt": "For child care, please provide: the child's full name and date of birth; the total "
+               "amount paid; the provider's name; and the provider's SIN (if an individual) or "
+               "Business Number (if a business), if available.",
+     "ai_parse": "Return the child care details as given."},
+    {"id": 45.42, "field": "childcare_receipt", "type": "file", "condition": YES("has_childcare"),
+     "prompt": "Please upload the child care receipt(s) or annual statement with 📎, then 'done' "
+               "(or 'skip').", "ai_parse": "File upload - handled separately."},
+
+    # Northern residents / travel benefits (prescribed Zone A or Zone B).
+    {"id": 45.5, "field": "has_northern_travel", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Did your employer provide travel benefits or reimburse you for travel because you "
+               "lived or worked in a prescribed Northern or Intermediate Zone (Zone A or Zone B) "
+               "during {year}?", "ai_parse": "Return Yes or No."},
+    {"id": 45.51, "field": "northern_t4", "type": "file", "condition": YES("has_northern_travel"),
+     "prompt": "Please upload your T4 slip with 📎, then 'done'.",
+     "ai_parse": "File upload - handled separately."},
+    {"id": 45.52, "field": "northern_receipts", "type": "file", "condition": YES("has_northern_travel"),
+     "prompt": "Upload any travel receipts (airfare, hotel, etc.) with 📎, then 'done' "
+               "(or 'skip' if none).", "ai_parse": "File upload - handled separately."},
+    {"id": 45.53, "field": "northern_zone", "type": "select", "condition": YES("has_northern_travel"),
+     "options": ["Zone A (Northern)", "Zone B (Intermediate)", "Not sure"],
+     "prompt": "Did you live or work in Zone A (Northern Zone) or Zone B (Intermediate Zone)?",
+     "ai_parse": "Map to 'Zone A (Northern)', 'Zone B (Intermediate)', or 'Not sure'."},
+
     {"id": 47, "field": "rent_paid_2025", "type": "number", "min": 0,
-     "prompt": "Total rent you paid as a tenant in 2025 (enter 0 if none)?",
+     "prompt": "Total rent you paid as a tenant in {year} (enter 0 if none)?",
      "ai_parse": "Rent amount as a number."},
     {"id": 48, "field": "rent_proof", "type": "boolean", "options": ["Yes", "No"],
      "condition": lambda a: _num(a, "rent_paid_2025") > 0,
      "prompt": "Do you have proof of rent (receipts / landlord details)?", "ai_parse": "Return Yes or No."},
 
     {"id": 49, "field": "province_changed", "type": "boolean", "options": ["Yes", "No"],
-     "prompt": "Did you change your province of residence during 2025?", "ai_parse": "Return Yes or No."},
-    {"id": 50, "field": "province_move_info", "type": "text", "condition": YES("province_changed"),
-     "prompt": "Date of move (DD/MM/YYYY) and your new province?", "ai_parse": "Move date + new province."},
+     "prompt": "Did you change your province of residence during {year}?", "ai_parse": "Return Yes or No."},
+    {"id": 50.1, "field": "move_date", "type": "date", "condition": YES("province_changed"),
+     "prompt": "What was your date of move? (DD/MM/YYYY)", "ai_parse": "Move date DD/MM/YYYY."},
+    {"id": 50.2, "field": "province_from", "type": "text", "condition": YES("province_changed"),
+     "prompt": "Which province did you move from?", "ai_parse": "Extract the province."},
+    {"id": 50.3, "field": "province_to", "type": "text", "condition": YES("province_changed"),
+     "prompt": "Which province did you move to?", "ai_parse": "Extract the province."},
+    {"id": 50.4, "field": "move_reason", "type": "select", "condition": YES("province_changed"),
+     "options": ["Work / New Job", "Business", "Full-time Studies", "Other"],
+     "prompt": "What was the main reason for your move?",
+     "ai_parse": "Map to one of: Work / New Job, Business, Full-time Studies, Other."},
+    {"id": 50.5, "field": "move_40km", "type": "select", "options": ["Yes", "No", "Not Sure"],
+     "condition": lambda a: a.get("province_changed") == "Yes" and a.get("move_reason") in (
+         "Work / New Job", "Business", "Full-time Studies"),
+     "prompt": "Was your new home at least 40 km closer to your new work location, business, or school?",
+     "ai_parse": "Map to Yes, No, or Not Sure."},
+    {"id": 50.6, "field": "move_expenses", "type": "textarea",
+     "condition": lambda a: a.get("move_40km") in ("Yes", "Not Sure"),
+     "prompt": "Did you have any moving expenses? Please reply with all that apply in one message - "
+               "e.g. moving company / transportation; travel (fuel, meals, hotels); temporary "
+               "accommodation; storage; lease-cancellation fees; utility connection/disconnection "
+               "fees; other. Type 'None' if you had none.",
+     "ai_parse": "Return the list of moving expenses as given, or 'None'."},
+    {"id": 50.7, "field": "move_receipts", "type": "file",
+     "condition": lambda a: a.get("move_40km") in ("Yes", "Not Sure"),
+     "preamble": ("Please keep all receipts related to your moving expenses. If you have them, "
+                  "upload them now - we'll review your eligibility and claim all allowable moving "
+                  "expenses on your tax return."),
+     "prompt": "Upload your moving-expense receipt(s) with 📎, then 'done' (or 'skip').",
+     "ai_parse": "File upload - handled separately."},
     {"id": 51, "field": "left_canada_date", "type": "text", "check": "date_or_no",
      "prompt": "If you left/plan to leave Canada in 2025, enter the date (DD/MM/YYYY); else 'No'.",
      "ai_parse": "Departure date DD/MM/YYYY, or 'No'."},
@@ -309,10 +416,6 @@ PERSONAL = [
      "prompt": "Your spouse's date of leaving Canada (DD/MM/YYYY), if applicable; else 'No'.",
      "ai_parse": "Departure date DD/MM/YYYY, or 'No'."},
 
-    {"id": 52.5, "field": "last_refund", "type": "text",
-     "prompt": "What was your most recent tax refund (or amount owing)? "
-               "Enter the amount, or reply 'unknown'.",
-     "ai_parse": "Extract the refund/amount-owing figure, or 'unknown'."},
 
     {"id": 52.6, "field": "third_party_payer", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Will someone else be paying your fee on your behalf?",
@@ -326,7 +429,7 @@ PERSONAL = [
      "prompt": "Any other income, deductions, or notes? (Type 'none' if nothing.)",
      "ai_parse": "Return the note, or 'none'."},
     {"id": 54, "field": "confirmation", "type": "text",
-     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
+     "prompt": "Type YES to confirm everything above is accurate - or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -343,9 +446,10 @@ CORPORATE = [
     {"id": 103.5, "field": "sin_document", "type": "file",
      "prompt": "Please upload a photo or PDF of the director's SIN document with 📎, "
                "then type 'done' (or type 'skip' if you don't have it handy).",
-     "ai_parse": "File upload — handled separately."},
-    {"id": 104, "field": "address", "type": "textarea",
-     "prompt": "Primary director's residential address?", "ai_parse": "Extract the address."},
+     "ai_parse": "File upload - handled separately."},
+    {"id": 104, "field": "address", "type": "textarea", "check": "postal",
+     "prompt": "Primary director's residential address (including postal code)?",
+     "ai_parse": "Extract the address."},
     {"id": 105, "field": "phone", "type": "phone",
      "prompt": "Primary director's mobile number?", "ai_parse": "Phone digits."},
     {"id": 106, "field": "email", "type": "email",
@@ -353,31 +457,35 @@ CORPORATE = [
     {"id": 107, "field": "has_other_directors", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Are there other directors or business partners?", "ai_parse": "Return Yes or No."},
     {"id": 108, "field": "other_directors", "type": "textarea", "condition": YES("has_other_directors"),
-     "prompt": "For EACH other director/partner — full legal name, SIN, contact number, address, "
+     "prompt": "For EACH other director/partner - full legal name, SIN, contact number, address, "
                "and email?", "ai_parse": "Return the directors' details as given."},
-    {"id": 109, "field": "corp_gst_number", "type": "text", "check": "code",
+    {"id": 109, "field": "corp_gst_number", "type": "text", "check": "gst",
      "prompt": "Corporation's 9-digit GST number? (reply 'none' if not set up)",
      "ai_parse": "Extract the GST number or 'none'."},
-    {"id": 110, "field": "corp_gst_reporting", "type": "text",
+    {"id": 110, "field": "corp_gst_reporting", "type": "text", "check": "period",
      "condition": lambda a: (a.get("corp_gst_number") or "").lower() != "none",
-     "prompt": "Corporate GST reporting period?", "ai_parse": "Extract the reporting period."},
+     "prompt": "Corporate GST reporting period? (e.g. Jan 2025 - Dec 2025)",
+     "ai_parse": "Extract the reporting period."},
     {"id": 111, "field": "corp_gst_access", "type": "text", "check": "code",
      "condition": lambda a: (a.get("corp_gst_number") or "").lower() != "none",
-     "prompt": "Corporate GST Access Code?", "ai_parse": "Extract the access code."},
+     "prompt": "Corporate GST Access Code / Net File Code?", "ai_parse": "Extract the access code."},
     {"id": 112, "field": "issued_t4a", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Did the corporation issue or receive any T4A slips this year?",
      "ai_parse": "Return Yes or No."},
+    {"id": 112.5, "field": "t4a_slip", "type": "file", "condition": YES("issued_t4a"),
+     "prompt": "Please upload the T4A slip(s) with 📎, then type 'done' (or 'skip' if not handy).",
+     "ai_parse": "File upload - handled separately."},
     {"id": 113, "field": "bank_statement_full", "type": "file", "condition": YES("issued_t4a"),
-     "prompt": "Please upload the FULL annual bank statement (Jan 1 – Dec 31) with 📎, then 'done'.",
-     "ai_parse": "File upload — handled separately."},
-    {"id": 114, "field": "bank_statement_dec", "type": "file", "condition": EQ("issued_t4a", "No"),
+     "prompt": "Please upload the FULL annual bank statement (Jan 1 - Dec 31) with 📎, then 'done'.",
+     "ai_parse": "File upload - handled separately."},
+    {"id": 114, "field": "bank_statement_dec", "type": "file",
      "prompt": "Please upload the DECEMBER bank statement (Dec 31 closing balance) with 📎, then 'done'.",
-     "ai_parse": "File upload — handled separately."},
+     "ai_parse": "File upload - handled separately."},
     {"id": 115, "field": "additional_notes", "type": "textarea",
      "prompt": "Any other notes for the corporate filing? (Type 'none' if nothing.)",
      "ai_parse": "Return the note, or 'none'."},
     {"id": 116, "field": "confirmation", "type": "text",
-     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
+     "prompt": "Type YES to confirm everything above is accurate - or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -396,27 +504,29 @@ GST = [
     {"id": 204.5, "field": "sin_document", "type": "file",
      "prompt": "Please upload a photo or PDF of your SIN document with 📎, "
                "then type 'done' (or type 'skip' if you don't have it handy).",
-     "ai_parse": "File upload — handled separately."},
+     "ai_parse": "File upload - handled separately."},
     {"id": 205, "field": "dob", "type": "date", "prompt": "Your date of birth (DD/MM/YYYY)?",
      "ai_parse": "DOB DD/MM/YYYY."},
-    {"id": 206, "field": "address", "type": "textarea",
-     "prompt": "Your complete residential address?", "ai_parse": "Extract the address."},
+    {"id": 206, "field": "address", "type": "textarea", "check": "postal",
+     "prompt": "Your complete residential address (including postal code)?",
+     "ai_parse": "Extract the address."},
     {"id": 207, "field": "gst_platforms", "type": "text",
      "prompt": "Which rideshare/delivery platforms do you operate on? (list all)",
      "ai_parse": "Extract the list of platforms."},
-    {"id": 208, "field": "gst_number", "type": "text", "check": "code",
+    {"id": 208, "field": "gst_number", "type": "text", "check": "gst",
      "condition": EQ("gst_service", "File a GST Return"), "preamble": GST_WARNING,
      "prompt": "Your 9-digit GST number?", "ai_parse": "Extract the GST number."},
-    {"id": 209, "field": "gst_reporting_period", "type": "text",
+    {"id": 209, "field": "gst_reporting_period", "type": "text", "check": "period",
      "condition": EQ("gst_service", "File a GST Return"),
-     "prompt": "Your GST reporting period?", "ai_parse": "Extract the reporting period."},
+     "prompt": "Your GST reporting period? (e.g. Jan 2025 - Dec 2025)",
+     "ai_parse": "Extract the reporting period."},
     {"id": 210, "field": "gst_access_code", "type": "text", "check": "code",
      "condition": EQ("gst_service", "File a GST Return"),
      "prompt": "Your CRA Access Code / Net File Code?", "ai_parse": "Extract the access code."},
     {"id": 211, "field": "additional_notes", "type": "textarea",
      "prompt": "Any other notes? (Type 'none' if nothing.)", "ai_parse": "Return the note, or 'none'."},
     {"id": 212, "field": "confirmation", "type": "text",
-     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
+     "prompt": "Type YES to confirm everything above is accurate - or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
 
@@ -431,20 +541,27 @@ REGISTRATION = [
     {"id": 302, "field": "phone", "type": "phone", "prompt": "Your mobile number?", "ai_parse": "Phone digits."},
     {"id": 303, "field": "email", "type": "email", "prompt": "Your email address?", "ai_parse": "Email lowercased."},
     # incorporation
-    {"id": 304, "field": "address", "type": "textarea", "condition": EQ("reg_type", "New Incorporation"),
-     "prompt": "Your complete residential address?", "ai_parse": "Extract the address."},
+    {"id": 304, "field": "address", "type": "textarea", "check": "postal",
+     "condition": EQ("reg_type", "New Incorporation"),
+     "prompt": "Your complete residential address (including postal code)?",
+     "ai_parse": "Extract the address."},
     {"id": 305, "field": "sin", "type": "text", "check": "sin", "condition": EQ("reg_type", "New Incorporation"),
      "prompt": "Your SIN (9 digits)?", "ai_parse": "9-digit SIN."},
     {"id": 305.5, "field": "sin_document", "type": "file",
      "condition": EQ("reg_type", "New Incorporation"),
      "prompt": "Please upload a photo or PDF of your SIN document with 📎, "
                "then type 'done' (or type 'skip' if you don't have it handy).",
-     "ai_parse": "File upload — handled separately."},
+     "ai_parse": "File upload - handled separately."},
     {"id": 306, "field": "dob", "type": "date", "condition": EQ("reg_type", "New Incorporation"),
      "prompt": "Your date of birth (DD/MM/YYYY)?", "ai_parse": "DOB DD/MM/YYYY."},
     {"id": 307, "field": "business_activity", "type": "text", "condition": EQ("reg_type", "New Incorporation"),
      "prompt": "Your business activity / vertical? (e.g., Trucking, Restaurant, Construction)",
      "ai_parse": "Extract the business activity."},
+    {"id": 307.5, "field": "company_type", "type": "select", "options": ["Numbered", "Named"],
+     "condition": EQ("reg_type", "New Incorporation"),
+     "prompt": "Do you want a Numbered company or a Named company? "
+               "(a Named company has an extra name-search / NUANS fee)",
+     "ai_parse": "Map to 'Numbered' or 'Named'."},
     # renewal
     {"id": 308, "field": "registered_with_us", "type": "boolean", "options": ["Yes", "No"],
      "condition": EQ("reg_type", "Annual Renewal"),
@@ -460,8 +577,36 @@ REGISTRATION = [
     {"id": 311, "field": "additional_notes", "type": "textarea",
      "prompt": "Any other notes? (Type 'none' if nothing.)", "ai_parse": "Return the note, or 'none'."},
     {"id": 312, "field": "confirmation", "type": "text",
-     "prompt": "Type YES to confirm everything above is accurate — or tell me what to change (e.g. 'change email').",
+     "prompt": "Type YES to confirm everything above is accurate - or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
+]
+
+
+# Others - not a filing; just capture the enquiry and hand off to staff.
+OTHERS = [
+    {"id": 400, "field": "others_enquiry", "type": "textarea",
+     "prompt": "Please mention your enquiry and our team will contact you about it.",
+     "ai_parse": "Return the enquiry text as given."},
+]
+
+# Services that end with authorization + payment (everything except an "Others" enquiry).
+FILING_SERVICES = ("Personal Tax", "Corporate Tax", "GST/HST", "Business Registration")
+
+# Shared completion steps - asked after each filing workflow's own confirmation (untagged =
+# always considered; gated to filing services by condition).
+COMPLETION = [
+    # Initial payment comes first (the fee + terms are shown right after the details are confirmed).
+    {"id": 600, "field": "payment_reference", "type": "text",
+     "condition": lambda a: a.get("service_type") in FILING_SERVICES,
+     "prompt": "Once you've sent the e-Transfer, reply with your Interac confirmation/reference "
+               "number (you'll find it in your banking app after sending), or type 'skip' if you "
+               "haven't paid yet.",
+     "ai_parse": "Return the confirmation/reference number, or 'skip'."},
+    # Authorization to submit to the CRA comes AFTER the initial payment.
+    {"id": 601, "field": "authorization_agreed", "type": "boolean", "options": ["Yes", "No"],
+     "condition": lambda a: a.get("service_type") in FILING_SERVICES,
+     "preamble": AUTHORIZATION_MSG, "prompt": "Do you understand and agree?",
+     "ai_parse": "Return Yes or No."},
 ]
 
 
@@ -476,4 +621,6 @@ QUESTIONS = ([CUSTOMER_Q, SERVICE_Q]
              + _tag(PERSONAL, "Personal Tax")
              + _tag(CORPORATE, "Corporate Tax")
              + _tag(GST, "GST/HST")
-             + _tag(REGISTRATION, "Business Registration"))
+             + _tag(REGISTRATION, "Business Registration")
+             + _tag(OTHERS, "Others")
+             + COMPLETION)                # untagged: asked after any filing workflow completes

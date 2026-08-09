@@ -1,4 +1,4 @@
-"""Deterministic tax-slip parsing with pdfplumber — fast, free, offline.
+"""Deterministic tax-slip parsing with pdfplumber - fast, free, offline.
 
 Only works on TEXT-based PDFs. Scanned/photo PDFs yield no text, and the caller
 (documents.py) falls back to Gemini vision (ocr.py) for those and for images.
@@ -6,7 +6,7 @@ Only works on TEXT-based PDFs. Scanned/photo PDFs yield no text, and the caller
 import io
 import re
 
-# (slip type, keywords that identify it) — checked in order.
+# (slip type, keywords that identify it) - checked in order.
 SIGNATURES = [
     ("T4", ["statement of remuneration", "t4 "]),
     ("T4A", ["statement of pension, retirement", "t4a"]),

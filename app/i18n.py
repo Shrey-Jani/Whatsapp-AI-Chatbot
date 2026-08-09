@@ -1,10 +1,10 @@
-"""Multilingual layer — detect the user's language + script once, then speak it back.
+"""Multilingual layer - detect the user's language + script once, then speak it back.
 
 English passes through untouched (no LLM call, no drift, no cost). Non-English prompts are
 translated and cached: the question set is fixed, so each prompt is translated once ever.
 
 Mandated verbatim legal text (slip safeguard, GST warning, no-refund policy) is NEVER sent
-through here — those stay in English until a human translator signs off the Punjabi/Hindi.
+through here - those stay in English until a human translator signs off the Punjabi/Hindi.
 """
 from functools import lru_cache
 
@@ -13,7 +13,7 @@ from . import llm
 DEFAULT = "English"
 VALID = {"English", "Hindi/Latin", "Hindi/Devanagari", "Punjabi/Latin", "Punjabi/Gurmukhi"}
 
-_SCRIPT_RULE = ("Write using ordinary English/Latin letters (romanised) — do NOT use "
+_SCRIPT_RULE = ("Write using ordinary English/Latin letters (romanised) - do NOT use "
                 "Devanagari or Gurmukhi characters.")
 
 
@@ -43,7 +43,7 @@ def detect(text: str) -> str:
 
 @lru_cache(maxsize=2048)
 def localize(text: str, lang: str) -> str:
-    """Translate a bot message into the user's language+script. Cached — fixed prompt set."""
+    """Translate a bot message into the user's language+script. Cached - fixed prompt set."""
     if lang == DEFAULT or not llm.configured() or not (text or "").strip():
         return text
     language, script = _parts(lang)
@@ -51,7 +51,7 @@ def localize(text: str, lang: str) -> str:
         return llm.complete(
             f"Translate the message below into {language}.\n"
             f"{_SCRIPT_RULE if script == 'Latin' else f'Write in {script} script.'}\n"
-            f"Use natural, everyday {language} — not Hindi if the target is Punjabi.\n"
+            f"Use natural, everyday {language} - not Hindi if the target is Punjabi.\n"
             "Keep every number, amount, date format, URL and numbered list item EXACTLY as-is.\n"
             "Output ONLY the translation, no preamble.\n\n"
             f"{text}").strip()
@@ -64,7 +64,7 @@ GREETING = "Hello! How are you?"
 
 
 def greet_and_ask(user_text: str, question: str, lang: str) -> str:
-    """First turn: greet them, then ask the first question — in their language.
+    """First turn: greet them, then ask the first question - in their language.
 
     English uses the canned greeting (no LLM call, no drift). Other languages get a natural
     acknowledgement of whatever they actually said.
@@ -76,11 +76,12 @@ def greet_and_ask(user_text: str, question: str, lang: str) -> str:
         return llm.complete(
             f'A user opened a chat by saying: "{user_text}"\n\n'
             f"Reply in {language}. {_SCRIPT_RULE if script == 'Latin' else f'Write in {script} script.'}\n"
-            f"Use natural, everyday {language} — if the target is Punjabi use Punjabi words "
-            "(e.g. 'vadhiya', 'tuhada'), not Hindi ones.\n"
-            "First greet them warmly in a few words (acknowledge how they greeted you), then "
-            "immediately ask the question below, translated. Keep any numbered options exactly "
-            "as numbered.\n"
+            f"Use natural, everyday {language} - if the target is Punjabi use Punjabi words "
+            "(e.g. 'vadhiya', 'tuhada', 'sat sri akal'), NEVER Hindi words like 'kya', 'matlab', "
+            "'aap'.\n"
+            "Start with a SHORT warm greeting (e.g. 'Sat sri akal ji!') - do NOT repeat or quote "
+            "the user's message back to them. Then immediately ask the question below, translated. "
+            "Keep any numbered options exactly as numbered.\n"
             "Output ONLY the reply.\n\n"
             f"Question: {question}").strip()
     except Exception as e:

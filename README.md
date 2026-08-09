@@ -4,13 +4,13 @@ An AI chatbot that intakes personal-tax clients for a firm. It runs a guided
 conversation (web widget **and** WhatsApp), reads uploaded tax slips with OCR,
 quotes fees, and hands a clean summary + PDF to staff via an admin dashboard.
 
-- **Multilingual** — understands and replies in the user's language/script,
+- **Multilingual** - understands and replies in the user's language/script,
   including romanized Hinglish/Punglish; greets first, then asks.
-- **Slip OCR** — upload a T4/T5/etc. (PDF/JPG/PNG); the bot identifies the slip
+- **Slip OCR** - upload a T4/T5/etc. (PDF/JPG/PNG); the bot identifies the slip
   and pulls key fields.
-- **Existing clients** — matched by SIN, prior details prefilled.
+- **Existing clients** - matched by SIN, prior details prefilled.
 - **SIN encrypted at rest** (Fernet); shown back once at review so a typo is caught.
-- **Deterministic flow** — the question order is code, not the LLM. The LLM only
+- **Deterministic flow** - the question order is code, not the LLM. The LLM only
   parses free-text answers and translates.
 
 ## Stack
@@ -39,9 +39,9 @@ uvicorn app.main:app --reload
 | `GROQ_API_KEY` | if groq | from console.groq.com |
 | `GEMINI_API_KEY` | if gemini / OCR | Gemini vision is used for slip OCR either way |
 | `ADMIN_PASSWORD` | ✅ | gate for `/admin` |
-| `SIN_ENCRYPTION_KEY` | ✅ | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` — back it up; losing it loses the SINs |
-| `STORAGE_DIR` | — | where uploaded slips are written (default `uploaded_files`; use a persistent path in prod) |
-| `TAX_YEAR` | — | active filing year (default 2025) |
+| `SIN_ENCRYPTION_KEY` | ✅ | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` - back it up; losing it loses the SINs |
+| `STORAGE_DIR` | - | where uploaded slips are written (default `uploaded_files`; use a persistent path in prod) |
+| `TAX_YEAR` | - | active filing year (default 2025) |
 | `VERIFY_TOKEN`, `APP_SECRET` | WhatsApp only | Meta Cloud API webhook |
 
 ## Tests
@@ -60,7 +60,7 @@ The included `Procfile` is all Railway needs.
    so uploaded files survive restarts.
 4. **Settings → Networking → Generate Domain** for the public URL.
 
-> Note: hosts with an ephemeral disk (no volume) wipe uploaded files on restart —
+> Note: hosts with an ephemeral disk (no volume) wipe uploaded files on restart -
 > client data in Postgres is always safe; only the slip files need the volume.
 
 ## Layout

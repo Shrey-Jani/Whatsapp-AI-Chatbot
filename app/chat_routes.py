@@ -50,7 +50,7 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         for f in submission.PREFILL_FIELDS:
             state.pop(f, None)                                 # clear so the flow re-asks them
         reply, done = chat_engine.advance(state, None)
-        reply = "No problem — let's update your details.\n\n" + reply
+        reply = "No problem - let's update your details.\n\n" + reply
 
     sess.conversation_state_json = state
 
@@ -64,13 +64,20 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         state["_escalate_logged"] = True
         sess.conversation_state_json = state
 
-    if done and state.get("_done") and sess.client_id is None:   # first true completion
-        _c, sub = await submission.materialize(db, tenant, sess)
-        # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
-        reply += (f"\n\nYour tax summary has been prepared for our team.\n"
-                  f"Your reference number: {sub.reference_number}")
-        if state.get("third_party_payer") == "Yes":              # shared token (spec §7)
-            reply += "\nThis same reference applies to your payer's file."
+    if done and state.get("_done"):                              # first true completion
+        if state.get("service_type") == "Others":                # an enquiry, not a tax filing
+            if not state.get("_enquiry_logged"):                 # capture it for staff, keep it light
+                db.add(Escalation(tenant_id=tenant.id, session_id=sess.id, reason="general enquiry",
+                                  context_json={"enquiry": state.get("others_enquiry")}))
+                state["_enquiry_logged"] = True
+                sess.conversation_state_json = state
+        elif sess.client_id is None:
+            _c, sub = await submission.materialize(db, tenant, sess)
+            # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
+            reply += (f"\n\nYour tax summary has been prepared for our team.\n"
+                      f"Your reference number: {sub.reference_number}")
+            if state.get("third_party_payer") == "Yes":          # shared token (spec §7)
+                reply += "\nThis same reference applies to your payer's file."
 
     await db.commit()
     return ChatResponse(reply=reply, done=done)
@@ -89,7 +96,7 @@ async def upload(session_id: str = Form(...), file: UploadFile = File(...),
         db, tenant, sess, data, file.filename, file.content_type or "")
 
     state = dict(sess.conversation_state_json or {})
-    if state.get("_done"):            # spec §7 — post-generation slip additions are chargeable
+    if state.get("_done"):            # spec §7 - post-generation slip additions are chargeable
         reply += (f"\n\nNote: your file was already completed and sent for review. Adding slips "
                   f"now incurs a ${pricing.PRICING['post_slip_charge']} handling charge "
                   f"(covers up to 3 slips).")
@@ -100,7 +107,7 @@ async def upload(session_id: str = Form(...), file: UploadFile = File(...),
 
 @router.get("/generate-pdf/{client_id}")
 async def generate_pdf(client_id: int, db: AsyncSession = Depends(get_db)):
-    """Generate the summary PDF on demand and return it directly — nothing is stored."""
+    """Generate the summary PDF on demand and return it directly - nothing is stored."""
     client = await db.get(Client, client_id)
     if client is None:
         return Response(status_code=404)

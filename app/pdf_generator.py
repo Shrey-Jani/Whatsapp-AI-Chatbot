@@ -41,7 +41,7 @@ def _decorate(canvas, doc):
 
 
 def _kv(pairs):
-    rows = [[k, str(v) if v not in (None, "") else "—"] for k, v in pairs]
+    rows = [[k, str(v) if v not in (None, "") else "-"] for k, v in pairs]
     t = Table(rows, colWidths=[2.2 * inch, 4.1 * inch])
     t.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), "Helvetica", 10),
@@ -53,7 +53,7 @@ def _kv(pairs):
     return t
 
 
-def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id: str = "—") -> bytes:
+def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id: str = "-") -> bytes:
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=colors.HexColor(BRAND))
     buf = io.BytesIO()
@@ -62,7 +62,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
     doc._footer = branding["footer"]
     s = []
 
-    # Page 1 — Cover
+    # Page 1 - Cover
     s += [Spacer(1, 1.6 * inch),
           Paragraph(branding["firm_name"], h1),
           Paragraph("Client Tax Summary", styles["Heading2"]),
@@ -72,7 +72,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
           Paragraph(f"<b>{branding['tagline']}</b>", styles["Title"]),
           PageBreak()]
 
-    # Page 2 — Personal Info
+    # Page 2 - Personal Info
     s += [Paragraph("Personal Information", h1),
           _kv([("Full name", data.get("full_name")), ("Phone", data.get("phone")),
                ("Email", data.get("email")), ("SIN", data.get("sin")),
@@ -81,7 +81,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
                ("Landing date", data.get("landing_date"))]),
           PageBreak()]
 
-    # Page 3 — Family
+    # Page 3 - Family
     fam = []
     if data.get("marital_status") in ("Married", "Common-Law"):
         fam += [("Spouse name", data.get("spouse_name")), ("Spouse DOB", data.get("spouse_dob")),
@@ -99,11 +99,10 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
           _kv(fam) if fam else Paragraph("No spouse or dependents on file.", styles["Normal"]),
           PageBreak()]
 
-    # Page 4 — Income & Documents
+    # Page 4 - Income & Documents
     s += [Paragraph("Income & Schedules", h1),
           _kv([("Filed last year", data.get("filed_last_year")),
                ("Tuition (T2202A)", data.get("has_tuition")),
-               ("OSAP (T4A)", data.get("tuition_osap")),
                ("Graduated 2025", data.get("graduation_2025")),
                ("Graduation date", data.get("graduation_date")),
                ("Gig / rideshare", data.get("is_gig")),
@@ -127,7 +126,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
           Paragraph("Uploaded Documents", styles["Heading3"])]
     if documents:
         rows = [["Slip Type", "Employer / Institution", "Filename"]] + \
-               [[d.get("slip_type") or "—", d.get("employer") or "—", d.get("filename")]
+               [[d.get("slip_type") or "-", d.get("employer") or "-", d.get("filename")]
                 for d in documents]
         table = Table(rows, colWidths=[1.3 * inch, 2.8 * inch, 2.2 * inch])
         table.setStyle(TableStyle([
@@ -143,7 +142,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
         s += [Paragraph("No documents uploaded.", styles["Normal"])]
     s += [PageBreak()]
 
-    # Page 5 — Housing & Life Changes
+    # Page 5 - Housing & Life Changes
     s += [Paragraph("Housing & Life Changes", h1),
           _kv([("Rent paid (2025)", data.get("rent_paid_2025")),
                ("Proof of rent", data.get("rent_proof")),
@@ -154,7 +153,7 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
                ("Spouse left Canada", data.get("spouse_left_canada_date"))]),
           PageBreak()]
 
-    # Page 6 — Notes & Policies
+    # Page 6 - Notes & Policies
     s += [Paragraph("Notes & Policies", h1),
           _kv([("Additional notes", data.get("additional_notes"))]),
           Spacer(1, 0.3 * inch),
@@ -177,7 +176,7 @@ async def generate_tax_summary_pdf(db, client_id) -> bytes:
     branding = {**BRANDING_DEFAULT, **((tenant.config or {}).get("branding", {}) if tenant else {})}
     documents = [{"slip_type": d.slip_type, "employer": d.employer_name, "filename": d.filename}
                  for d in docs]
-    ref = (sub.reference_number or str(sub.id)) if sub else "—"
+    ref = (sub.reference_number or str(sub.id)) if sub else "-"
     data = dict(client.raw_answers or {})
     data["sin"] = reveal_sin(client.sin)      # decrypted for the firm's working copy
     if client.spouse_json and client.spouse_json.get("sin"):

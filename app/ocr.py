@@ -1,7 +1,7 @@
 """Extract structured data from an uploaded Canadian tax slip using Gemini vision.
 
 Accepts images (JPG/PNG) and PDFs. Returns the slip type + key monetary boxes so the firm
-gets the numbers typed for them and we can count slips for pricing. Never raises — a failed
+gets the numbers typed for them and we can count slips for pricing. Never raises - a failed
 read returns an 'Unknown' result so the flow keeps moving.
 """
 from .chat_engine import _safe_json

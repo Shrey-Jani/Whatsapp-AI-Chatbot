@@ -6,7 +6,7 @@ def test_identify_t4():
 
 
 def test_identify_t5():
-    assert identify_slip_type("RBC — Statement of Investment Income (T5)") == "T5"
+    assert identify_slip_type("RBC - Statement of Investment Income (T5)") == "T5"
 
 
 def test_identify_unknown():

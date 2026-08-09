@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
 
-# Every client-owned row carries tenant_id — this is what lets us sell to multiple firms
+# Every client-owned row carries tenant_id - this is what lets us sell to multiple firms
 # with isolated data. Row-Level Security (Phase 7) is enforced on this column.
 
 
@@ -29,7 +29,7 @@ class Client(Base):
     full_name: Mapped[str | None] = mapped_column(String, nullable=True)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
-    # PII — never logged. Indexed because returning customers are matched on it.
+    # PII - never logged. Indexed because returning customers are matched on it.
     sin: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     dob: Mapped[str | None] = mapped_column(String, nullable=True)   # DD/MM/YYYY per spec
     address: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -55,7 +55,7 @@ class Document(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
-    # Files arrive during intake, before a Client is materialised — attach to the session,
+    # Files arrive during intake, before a Client is materialised - attach to the session,
     # link the client at confirmation (Phase 5).
     session_id: Mapped[int | None] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
     client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)
@@ -99,7 +99,7 @@ class Submission(Base):
 
 
 class Payment(Base):
-    """e-Transfer (manual confirmation per spec) — no gateway. Reference number is the key."""
+    """e-Transfer (manual confirmation per spec) - no gateway. Reference number is the key."""
     __tablename__ = "payments"
 
     id: Mapped[int] = mapped_column(primary_key=True)

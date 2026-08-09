@@ -19,7 +19,7 @@ async def get_db():
 
 
 async def init_db():
-    from . import models  # noqa: F401 — register tables on Base.metadata
+    from . import models  # noqa: F401 - register tables on Base.metadata
     # ponytail: create_all for scaffold; switch to Alembic once the schema stops moving.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -42,7 +42,7 @@ async def on_unhandled(request: Request, exc: Exception):
     (FastAPI's own handler still returns intentional HTTPExceptions like 401/404 as-is.)"""
     log.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500,
-                        content={"reply": "Something went wrong on our side — please try again.",
+                        content={"reply": "Something went wrong on our side - please try again.",
                                  "done": False, "detail": "internal server error"})
 
 

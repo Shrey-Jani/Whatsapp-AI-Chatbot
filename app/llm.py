@@ -1,7 +1,7 @@
 """Provider-agnostic text completion. Set LLM_PROVIDER=gemini|groq in .env.
 
 All LLM traffic funnels through complete() so swapping providers never touches business logic.
-Callers are responsible for their own fallback — this raises on failure rather than guessing.
+Callers are responsible for their own fallback - this raises on failure rather than guessing.
 """
 import httpx
 
@@ -29,7 +29,7 @@ def _gemini(prompt: str) -> str:
 
 
 def _groq(prompt: str) -> str:
-    """Groq speaks the OpenAI chat format — plain httpx, no extra SDK needed."""
+    """Groq speaks the OpenAI chat format - plain httpx, no extra SDK needed."""
     r = httpx.post(
         GROQ_URL,
         headers={"Authorization": f"Bearer {settings.groq_api_key}"},

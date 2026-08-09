@@ -3,10 +3,10 @@
 Fernet (authenticated AES) protects the readable SIN in the database. Generate a key with:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 and put it in SIN_ENCRYPTION_KEY. With no key set, values pass through as plaintext so the app
-still runs — but the SIN is then NOT protected, so set the key in any real deployment.
+still runs - but the SIN is then NOT protected, so set the key in any real deployment.
 
 Lookup for returning customers decrypts-and-compares (see submission.prefill_existing) rather
-than storing a hash of the SIN — the plaintext never sits in the database to be indexed on.
+than storing a hash of the SIN - the plaintext never sits in the database to be indexed on.
 """
 from functools import lru_cache
 
@@ -22,11 +22,11 @@ def _fernet():
 
 
 def protect_sin(sin: str | None) -> str | None:
-    """Value to STORE for a SIN — ciphertext if a key is set, else plaintext (with a warning)."""
+    """Value to STORE for a SIN - ciphertext if a key is set, else plaintext (with a warning)."""
     if not sin:
         return sin
     if not settings.sin_encryption_key:
-        print("[security] SIN_ENCRYPTION_KEY not set — storing SIN in plaintext.")
+        print("[security] SIN_ENCRYPTION_KEY not set - storing SIN in plaintext.")
         return sin
     return _PREFIX + _fernet().encrypt(sin.encode()).decode()
 

@@ -1,6 +1,187 @@
-from app.chat_engine import get_next_question, validate_answer
+from app.chat_engine import _done_message, _payment_terms, get_next_question, validate_answer
+from app.question_flow import QUESTIONS
 
-# customer_status (New/Existing) is asked first, then service_type — include both in fixtures.
+
+def _q(field):
+    return next(x for x in QUESTIONS if x["field"] == field)
+
+
+def test_address_requires_postal_code():
+    assert not validate_answer("21 purebooke ave", _q("address"))[0]      # client bug: no postal
+    assert validate_answer("21 Purebrook Ave, Toronto M5V 3L9", _q("address"))[0]
+
+
+def test_gst_reporting_period_requires_year():
+    assert not validate_answer("some period", _q("corp_gst_reporting"))[0]
+    assert validate_answer("Jan 2025 to Dec 2025", _q("corp_gst_reporting"))[0]
+
+
+def test_kb_link_removed_everywhere():
+    # Client removed the "refund lower than friends" KB link + message from the closing (PDF p11).
+    kb = "benefits-discrepancies"
+    assert kb not in _done_message({"service_type": "Personal Tax"})
+    assert kb not in _done_message({"service_type": "Business Registration",
+                                    "reg_type": "New Incorporation"})
+    assert kb not in _done_message({"service_type": "Corporate Tax"})
+
+
+def test_etransfer_email_shown_at_completion():
+    assert "raviaccuratetax@gmail.com" in _payment_terms({"service_type": "Personal Tax"})
+
+
+def test_cra_rep_auth_guidance_shown():
+    from app.chat_engine import advance
+    seed = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
+            "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
+            "dob": "01/01/1990", "address": "1 St, Toronto M5V 3L9", "age": "36", "landed_2024": "No"}
+    reply, _ = advance(dict(seed), "Yes")     # answering has_mycra = Yes
+    assert "active CRA My Account" in reply and "6. Grant us Level 2" in reply
+    assert "2026 tuition credits" in reply and "2025 Notice of Assessment" in reply
+
+
+def test_client_folder_and_categorized_form():
+    from app.submission import client_folder, categorized_form
+    a = {"full_name": "Vijay Sahi", "phone": "647 402 1615", "sin": "046454286",
+         "marital_status": "Married", "spouse_name": "Kamal", "has_mycra": "Yes"}
+    assert client_folder(a) == "Vijay_Sahi_6474021615"          # <Name>_<phone>, sanitised
+    form = categorized_form(a, [{"slip_type": "T4", "filename": "t4.pdf"}])
+    for section in ("Basic info", "Income info", "Spouse info", "Dependent info",
+                    "NOA shared or not", "CRA access given or not"):
+        assert section in form
+    assert "046454286" not in form and "•••-•••-286" in form    # SIN masked, not plaintext
+
+
+def test_policies_shown_on_every_completion():
+    # The old one-line no-refund policy is retired; the full Policies & Procedures closes EVERY
+    # completion, for all services.
+    for svc in ({"service_type": "Personal Tax"}, {"service_type": "GST/HST"},
+                {"service_type": "Corporate Tax"},
+                {"service_type": "Business Registration", "reg_type": "Annual Renewal"}):
+        msg = _payment_terms(svc)
+        assert "Policies & Procedures" in msg
+        assert "partially or fully non-refundable" in msg
+    assert "final no refunds once processing" not in _payment_terms({"service_type": "Corporate Tax"})
+
+
+def test_personal_closing_is_client_payment_message():
+    msg = _payment_terms({"service_type": "Personal Tax"})
+    assert "initial payment of $45" in msg and "raviaccuratetax@gmail.com" in msg
+    assert "Personal tax return (up to 3 slips): $60" in msg
+
+
+def test_batch_additions():
+    from app.chat_engine import _done_message
+    from app.question_flow import QUESTIONS, SERVICE_Q
+    fields = {q["field"] for q in QUESTIONS}
+    # new deduction question sets present
+    for f in ("has_gym", "gym_province", "has_childcare", "childcare_details",
+              "has_northern_travel", "northern_zone"):
+        assert f in fields
+    # tuition question removed
+    assert "has_tuition" not in fields and "graduation_2025" not in fields
+    # Others service option + its enquiry, and its own hand-off completion
+    assert "Others" in SERVICE_Q["options"] and "others_enquiry" in fields
+    assert "contact you" in _done_message({"service_type": "Others"})
+    # NOA "have us obtain" is now $80
+    noa = next(q for q in QUESTIONS if q["field"] == "noa_method")
+    assert any("$80" in o for o in noa["options"])
+
+
+def test_address_geocode_soft_check(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce.llm, "configured", lambda: False)        # deterministic parse
+    monkeypatch.setattr(ce.geocode, "configured", lambda: True)     # verification on
+    seed = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
+            "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
+            "dob": "01/01/1990"}
+    assert ce.get_next_question(seed)["field"] == "address"
+
+    # 1) unverifiable address → rejected once, with the suggestion; NOT stored
+    monkeypatch.setattr(ce.geocode, "verify",
+                        lambda a: {"ok": False, "suggestion": "10 King St W, Toronto ON M5H 1A1"})
+    s = dict(seed)
+    reply, done = ce.advance(s, "999 Fakeplace Rd, Nowhere M5V 3L9")
+    assert "couldn't verify" in reply and "Did you mean" in reply and not done
+    assert "address" not in s                                        # rejected, not saved
+
+    # 2) user re-sends the SAME address → accepted as typed, flow advances
+    reply2, _ = ce.advance(s, "999 Fakeplace Rd, Nowhere M5V 3L9")
+    assert s.get("address") == "999 Fakeplace Rd, Nowhere M5V 3L9"
+
+    # 3) a verifiable address is accepted on the first try
+    monkeypatch.setattr(ce.geocode, "verify", lambda a: {"ok": True, "suggestion": a})
+    s2 = dict(seed)
+    ce.advance(s2, "10 King St W, Toronto ON M5H 1A1")
+    assert s2.get("address") == "10 King St W, Toronto ON M5H 1A1"
+
+
+def test_completion_authorization_and_payment_flow():
+    import app.chat_engine as ce
+    from app.question_flow import QUESTIONS
+    fields = {q["field"] for q in QUESTIONS}
+    # new moving sub-flow + gig GST questions exist
+    for f in ("move_date", "province_from", "move_reason", "move_40km", "move_expenses",
+              "gig_has_gst", "gig_netfile", "authorization_agreed", "payment_reference"):
+        assert f in fields
+    st = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
+          "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
+          "dob": "01/01/1990", "address": "1 St, Toronto M5V 3L9", "age": "36", "landed_2024": "No",
+          "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
+          "income_slips": "skip", "is_gig": "No", "owns_rental": "No", "first_home": "No",
+          "has_medical": "No", "has_donations": "No", "has_gym": "No", "has_childcare": "No",
+          "has_northern_travel": "No", "rent_paid_2025": "0", "province_changed": "No",
+          "left_canada_date": "No", "additional_notes": "none", "third_party_payer": "No"}
+    s = dict(st)
+    r1, d1 = ce.advance(s, "YES")                 # confirm details → fee/payment terms + ask reference
+    assert "$45" in r1 and "Interac" in r1 and not d1
+    r2, d2 = ce.advance(s, "CA1234ABCD")          # pay (reference) → authorization step
+    assert "Authorization" in r2 and not d2
+    r3, d3 = ce.advance(s, "Yes")                 # agree → done
+    assert d3 and s["payment_reference"] == "CA1234ABCD" and s["authorization_agreed"] == "Yes"
+
+
+def test_gst_registration_closing():
+    reg = _payment_terms({"service_type": "GST/HST", "gst_service": "Register for a GST Number"})
+    assert "Registration Fee: $85" in reg and "GST Program Account Registration" in reg
+    assert "raviaccuratetax@gmail.com" in reg and "Policies & Procedures" in reg
+    # a GST *return* still uses the $45 pricing message, not the $85 registration one
+    ret = _payment_terms({"service_type": "GST/HST", "gst_service": "File a GST Return"})
+    assert "Registration Fee: $85" not in ret and "initial payment of $45" in ret
+
+
+def test_benefits_explainer_personal_tax_only_at_end():
+    personal = _payment_terms({"service_type": "Personal Tax"})
+    assert "Canada Child Benefit (CCB)" in personal
+    assert personal.rstrip().endswith("claim all applicable ones on your tax return.")  # very end
+    for svc in ({"service_type": "GST/HST"}, {"service_type": "Corporate Tax"}):
+        assert "Canada Child Benefit" not in _payment_terms(svc)
+
+
+def test_gst_number_format_validation():
+    assert validate_answer("719404519RT0001", _q("corp_gst_number"))[0]     # p14: valid BN
+    assert validate_answer("719404519", _q("corp_gst_number"))[0]
+    assert validate_answer("none", _q("corp_gst_number"))[0]                # allowed for corp
+    assert not validate_answer("2345", _q("corp_gst_number"))[0]            # p15: too short
+
+
+def test_future_dates_rejected():
+    assert not validate_answer("01/01/2050", _q("dob"))[0]
+    assert validate_answer("01/01/1990", _q("dob"))[0]
+
+
+def test_age_dob_cross_check():
+    from app.chat_engine import _age_vs_dob_error
+    assert _age_vs_dob_error("20", "01/01/1990")      # contradicts DOB → error string
+    assert not _age_vs_dob_error("36", "01/01/1990")  # matches → ""
+
+
+def test_named_company_fee_note():
+    from app.pricing import estimate
+    named = estimate("Business Registration", {"reg_type": "New Incorporation", "company_type": "Named"})
+    numbered = estimate("Business Registration", {"reg_type": "New Incorporation", "company_type": "Numbered"})
+    assert "NUANS" in named and "NUANS" not in numbered
+
+# customer_status (New/Existing) is asked first, then service_type - include both in fixtures.
 CORE = {"customer_status": "New Customer", "service_type": "Personal Tax",
         "full_name": "Jane Doe", "phone": "4161234567", "email": "jane@example.com",
         "sin": "046454286", "sin_document": "skip", "dob": "01/01/1990"}
@@ -95,7 +276,7 @@ def test_code_field_rejects_non_answer():
 
 def test_allowed_literal_preserved_over_llm():
     # A literal the ai_parse quotes (No / unknown / none) must be returned verbatim,
-    # never sent to the LLM — which was turning "No" into an empty value and looping.
+    # never sent to the LLM - which was turning "No" into an empty value and looping.
     from app.chat_engine import parse_answer
     q_no = {"type": "text", "check": "date_or_no", "ai_parse": "Departure date DD/MM/YYYY, or 'No'."}
     assert parse_answer("No", q_no)["value"] == "No"
@@ -119,7 +300,7 @@ def test_sin_luhn_validation():
 
 
 def test_date_accepts_any_year_when_unconstrained():
-    assert validate_answer("31/08/2022", {"type": "date"})[0]      # DOB etc. — any year
+    assert validate_answer("31/08/2022", {"type": "date"})[0]      # DOB etc. - any year
     assert validate_answer("01-01-1999", {"type": "date"})[0]      # dashes ok
     assert not validate_answer("2022/31/08", {"type": "date"})[0]  # month 31 → real-date check
 
@@ -139,10 +320,11 @@ def test_edit_field_at_review(monkeypatch):
              "phone": "4160001234", "email": "old@x.com", "sin": "046454286", "sin_document": "skip",
              "dob": "01/01/1990", "address": "1 St", "age": "35", "landed_2024": "No",
              "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
-             "income_slips": "skip", "has_tuition": "No", "is_gig": "No", "owns_rental": "No",
-             "first_home": "No", "has_medical": "No", "has_donations": "No", "rent_paid_2025": "0",
-             "province_changed": "No", "left_canada_date": "No", "student_completion_date": "No",
-             "additional_notes": "none", "last_refund": "unknown", "third_party_payer": "No"}
+             "income_slips": "skip", "is_gig": "No", "owns_rental": "No",
+             "first_home": "No", "has_medical": "No", "has_donations": "No",
+             "has_gym": "No", "has_childcare": "No", "has_northern_travel": "No",
+             "rent_paid_2025": "0", "province_changed": "No", "left_canada_date": "No",
+             "additional_notes": "none", "third_party_payer": "No"}
     assert ce.get_next_question(state)["field"] == "confirmation"
     reply, done = ce.advance(state, "change my email")
     assert "email" not in state          # email was cleared for re-entry
@@ -179,7 +361,7 @@ def test_repeated_errors_auto_escalate(monkeypatch):
                         lambda t, q, lang=None: {"value": t, "confidence": 1.0})
     state = {"service_type": "Personal Tax", "customer_status": "New Customer",
              "full_name": "Jane Doe", "phone": "4160001111", "email": "jane@example.com"}
-    # next question is SIN — feed an invalid one repeatedly
+    # next question is SIN - feed an invalid one repeatedly
     assert not ce.advance(state, "123456789")[1]      # error 1
     assert not ce.advance(state, "123456789")[1]      # error 2
     reply, done = ce.advance(state, "123456789")      # error 3 → escalate
@@ -211,22 +393,8 @@ def test_newcomer_gets_world_income_notice(monkeypatch):
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
     state = dict(CORE, address="1 St", age="35")   # landed_2024 is the next question
     reply, _ = ce.advance(state, "Yes")            # landed in Canada in 2024
-    assert "worldwide income" in reply.lower()
-    assert "canada.ca" in reply                    # official IRCC/CRA links attached
-
-
-def test_first_home_buyer_gets_cra_link(monkeypatch):
-    import app.chat_engine as ce
-    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    # answers so that first_home is the next unanswered question
-    state = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
-             "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
-             "dob": "01/01/1990", "address": "1 St", "age": "35", "landed_2024": "No",
-             "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
-             "income_slips": "skip", "has_tuition": "No", "is_gig": "No", "owns_rental": "No"}
-    assert ce.get_next_question(state)["field"] == "first_home"
-    reply, _ = ce.advance(state, "Yes")            # first-time home buyer
-    assert "canada.ca" in reply
+    assert "worldwide income" in reply.lower()     # guidance stays; links removed per client
+    assert "canada.ca" not in reply                # all resource links removed
 
 
 def test_incorporation_shows_etransfer_directive(monkeypatch):

@@ -1,13 +1,13 @@
-"""File storage — local disk (default) or Cloudflare R2, chosen by STORAGE_BACKEND.
+"""File storage - local disk (default) or Cloudflare R2, chosen by STORAGE_BACKEND.
 
 Same interface for both backends:
     upload(tenant_id, path, data, content_type) -> key
     load(key) -> bytes
     exists(key) -> bool
 
-local  — zero setup, but needs a persistent disk (VPS / mounted volume). On ephemeral
+local  - zero setup, but needs a persistent disk (VPS / mounted volume). On ephemeral
          hosts (Render/Railway free) the disk is wiped on restart.
-r2     — Cloudflare R2 object storage, survives anywhere. Set STORAGE_BACKEND=r2 and the
+r2     - Cloudflare R2 object storage, survives anywhere. Set STORAGE_BACKEND=r2 and the
          R2_* keys. Files are served only through the authenticated admin API, never a
          public URL.
 """
@@ -49,7 +49,7 @@ _r2 = None
 def _client():
     global _r2
     if _r2 is None:
-        import boto3  # lazy — only needed when STORAGE_BACKEND=r2
+        import boto3  # lazy - only needed when STORAGE_BACKEND=r2
         _r2 = boto3.client(
             "s3",
             endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
