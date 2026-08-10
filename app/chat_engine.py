@@ -15,7 +15,7 @@ from .pricing import PRICING, estimate
 from .question_flow import (AUTHORIZATION_MSG, CRA_HELPLINE, ETRANSFER_DIRECTIVE,
                             GIG_GST_NETFILE_HELP, GST_WARNING, PROCUREMENT_SLA, QUESTIONS,
                             RENT_NO_PROOF_GUIDANCE, REP_AUTH_GUIDANCE, GIG_SUMMARY_GUIDANCE,
-                            RIDESHARE_PLATFORMS, WORLD_INCOME)
+                            RIDESHARE_PLATFORMS, TUITION_CREDIT_GUIDANCE, WORLD_INCOME)
 
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
@@ -458,6 +458,8 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     f = q["field"]
     if f == "is_gig" and value == "Yes":                                     # which platform reports to send
         notices.append(i18n.localize(GIG_SUMMARY_GUIDANCE, lang))
+    if f == "is_student" and value == "Yes":                                 # tuition credits -> NOA/Tax Summary
+        notices.append(i18n.localize(TUITION_CREDIT_GUIDANCE.format(year=settings.tax_year), lang))
     if f in ("gig_platforms", "gst_platforms") and _multi_platform(value):   # §4 mandatory GST
         state["gst_required"] = "Yes"
         notices.append(i18n.localize(

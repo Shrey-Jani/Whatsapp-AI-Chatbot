@@ -73,6 +73,10 @@ RENT_NO_PROOF_GUIDANCE = (                                                      
     "information) at a later date for verification. If you cannot provide it, the CRA may deny "
     "the rent claim and ask you to repay any related benefits, such as the Ontario Trillium "
     "Benefit, if applicable.")
+TUITION_CREDIT_GUIDANCE = (                                                      # student tuition credits
+    "If you are or were a student, you may have unused tuition tax credits available.\n\n"
+    "Please send us your {year} Notice of Assessment (NOA) or your {year} Tax Summary so we can "
+    "check whether you have any tuition credits carried forward that may be available to use.")
 MOVING_CHECKLIST = ("Since you changed provinces, you may be able to claim moving expenses. "
                     "Keep receipts for:\n\n"
                     "- Transportation & storage of household goods\n"
@@ -370,6 +374,14 @@ PERSONAL = [
      "options": ["Zone A (Northern)", "Zone B (Intermediate)", "Not sure"],
      "prompt": "Did you live or work in Zone A (Northern Zone) or Zone B (Intermediate Zone)?",
      "ai_parse": "Map to 'Zone A (Northern)', 'Zone B (Intermediate)', or 'Not sure'."},
+
+    # Student tuition credits - Yes triggers the NOA/Tax-Summary request (guidance shown in advance()).
+    {"id": 45.6, "field": "is_student", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Are you, or were you, a student?", "ai_parse": "Return Yes or No."},
+    {"id": 45.61, "field": "tuition_noa", "type": "file", "condition": YES("is_student"),
+     "prompt": "Please upload your {year} Notice of Assessment (NOA) or {year} Tax Summary with 📎, "
+               "then 'done' (or 'skip' if you don't have it handy).",
+     "ai_parse": "File upload - handled separately."},
 
     {"id": 47, "field": "rent_paid_2025", "type": "number", "min": 0,
      "prompt": "Total rent you paid as a tenant in {year} (enter 0 if none)?",

@@ -129,8 +129,9 @@ def test_completion_authorization_and_payment_flow():
           "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
           "income_slips": "skip", "is_gig": "No", "owns_rental": "No", "first_home": "No",
           "has_medical": "No", "has_donations": "No", "has_gym": "No", "has_childcare": "No",
-          "has_northern_travel": "No", "rent_paid_2025": "0", "province_changed": "No",
-          "left_canada_date": "No", "additional_notes": "none", "third_party_payer": "No"}
+          "has_northern_travel": "No", "is_student": "No", "rent_paid_2025": "0",
+          "province_changed": "No", "left_canada_date": "No", "additional_notes": "none",
+          "third_party_payer": "No"}
     s = dict(st)
     r1, d1 = ce.advance(s, "YES")                 # confirm details → fee/payment terms + ask reference
     assert "$45" in r1 and "Interac" in r1 and not d1
@@ -322,7 +323,7 @@ def test_edit_field_at_review(monkeypatch):
              "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
              "income_slips": "skip", "is_gig": "No", "owns_rental": "No",
              "first_home": "No", "has_medical": "No", "has_donations": "No",
-             "has_gym": "No", "has_childcare": "No", "has_northern_travel": "No",
+             "has_gym": "No", "has_childcare": "No", "has_northern_travel": "No", "is_student": "No",
              "rent_paid_2025": "0", "province_changed": "No", "left_canada_date": "No",
              "additional_notes": "none", "third_party_payer": "No"}
     assert ce.get_next_question(state)["field"] == "confirmation"
