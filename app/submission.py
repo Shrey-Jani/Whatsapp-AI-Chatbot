@@ -8,6 +8,7 @@ import re
 from sqlalchemy import select, update
 
 from . import storage
+from .chat_engine import age_from_dob
 from .config import settings
 from .models import Client, Document, Submission
 from .security import digits, protect_sin, reveal_sin
@@ -64,10 +65,10 @@ def categorized_form(a: dict, slips: list | None = None) -> str:
         f"CLIENT FORM - {a.get('full_name', '')} ({a.get('phone', '')})",
         sect("Basic info", [("Name", a.get("full_name")), ("Phone", a.get("phone")),
                             ("Email", a.get("email")), ("SIN", _mask_sin(a.get("sin"))),
-                            ("Date of birth", a.get("dob")), ("Age", a.get("age")),
+                            ("Date of birth", a.get("dob")), ("Age", age_from_dob(a.get("dob"))),
                             ("Address", a.get("address")), ("Marital status", a.get("marital_status"))]),
         sect("Income info", [("Filed last year", a.get("filed_last_year")),
-                             ("Slips uploaded", slip_txt), ("Tuition (T2202A)", a.get("has_tuition")),
+                             ("Slips uploaded", slip_txt), ("Student", a.get("is_student")),
                              ("Gig/rideshare", a.get("is_gig")), ("Gig platforms", a.get("gig_platforms")),
                              ("Owns rental", a.get("owns_rental")),
                              ("Rental income", a.get("rental_gross_income")),

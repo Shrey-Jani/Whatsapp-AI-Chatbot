@@ -14,7 +14,7 @@ from .config import settings
 from .pricing import PRICING, estimate
 from .question_flow import (AUTHORIZATION_MSG, CRA_HELPLINE, ETRANSFER_DIRECTIVE,
                             GIG_GST_NETFILE_HELP, GST_WARNING, PROCUREMENT_SLA, QUESTIONS,
-                            RENT_NO_PROOF_GUIDANCE, REP_AUTH_GUIDANCE, GIG_SUMMARY_GUIDANCE,
+                            RENT_NO_PROOF_GUIDANCE, REP_AUTH_NO, GIG_SUMMARY_GUIDANCE,
                             RIDESHARE_PLATFORMS, TUITION_CREDIT_GUIDANCE, WORLD_INCOME)
 
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
@@ -27,11 +27,11 @@ GO_BACK_PHRASES = ("go back", "wrong choice", "wrong answer", "wrong option", "p
 EDIT_ALIASES = {"e-mail": "email", "email": "email", "name": "full_name", "mobile": "phone",
                 "contact number": "phone", "phone": "phone", "address": "address",
                 "insurance number": "sin", "sin": "sin", "date of birth": "dob", "birth": "dob",
-                "dob": "dob", "age": "age", "marital": "marital_status", "marriage": "marital_status"}
+                "dob": "dob", "marital": "marital_status", "marriage": "marital_status"}
 # Fields shown in the review summary so the client can catch a mistake (incl. a mistyped SIN).
 REVIEW_FIELDS = [("corporation_name", "Corporation"), ("full_name", "Name"),
                  ("business_activity", "Business activity"), ("phone", "Phone"), ("email", "Email"),
-                 ("sin", "SIN"), ("age", "Age"), ("dob", "Date of birth"),
+                 ("sin", "SIN"), ("dob", "Date of birth"),
                  ("address", "Address"), ("marital_status", "Marital status")]
 DONE_MSG = ("Thank you we have everything we need. Our team will review your details and "
             "send your Information Sheet and price estimate shortly.\n\n"
@@ -290,21 +290,14 @@ def parse_answer(user_text: str, question: dict, lang: str = i18n.DEFAULT) -> di
 
 # ---- main loop ---------------------------------------------------------------
 
-def _age_vs_dob_error(age_str: str, dob_str: str | None) -> str:
-    """A stated age that contradicts the DOB by >1 year is a typo - ask them to re-enter."""
+def age_from_dob(dob_str: str | None) -> int | None:
+    """Compute age from a DOB (DD/MM/YYYY or ISO). Age is never asked - always derived."""
     nd = _normalize_date(dob_str or "")
     if not nd:
-        return ""
-    try:
-        age = int(float(age_str))
-    except (ValueError, TypeError):
-        return ""
+        return None
     d, mo, y = int(nd[:2]), int(nd[3:5]), int(nd[6:])
     today = datetime.now().date()
-    computed = today.year - y - ((today.month, today.day) < (mo, d))
-    if abs(age - computed) > 1:
-        return f"That age doesn't match your date of birth ({dob_str} ≈ {computed}). Please re-enter your age."
-    return ""
+    return today.year - y - ((today.month, today.day) < (mo, d))
 
 
 def _multi_platform(text: str) -> bool:
@@ -314,7 +307,14 @@ def _multi_platform(text: str) -> bool:
 
 
 def _review_summary(answers: dict, lang: str = i18n.DEFAULT) -> str:
-    lines = [f"• {label}: {answers[f]}" for f, label in REVIEW_FIELDS if answers.get(f)]
+    lines = []
+    for f, label in REVIEW_FIELDS:
+        if answers.get(f):
+            lines.append(f"• {label}: {answers[f]}")
+            if f == "dob":                     # age is derived from DOB, shown so a typo is caught
+                age = age_from_dob(answers[f])
+                if age is not None:
+                    lines.append(f"• Age: {age}")
     return i18n.localize("Here's a summary of your details:", lang) + "\n" + "\n".join(lines)
 
 
@@ -424,10 +424,6 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     if q["type"] == "date":                   # accept any year / separators, store DD/MM/YYYY
         value = _normalize_date(value) or value
     ok, err = validate_answer(value, q)
-    if ok and q["field"] == "age":             # cross-check the stated age against the DOB
-        cross = _age_vs_dob_error(value, answers.get("dob"))
-        if cross:
-            ok, err = False, cross
     if ok and q.get("check") == "postal" and geocode.configured():   # optional address verification
         if value == state.get("_addr_last"):   # user re-sent the same address → accept as typed
             state.pop("_addr_last", None)
@@ -482,9 +478,9 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         notices.append(CRA_HELPLINE)           # mandated verbatim (+ phone)
     if f == "reg_type" and value == "New Incorporation":                     # §6 e-Transfer first
         notices.append(ETRANSFER_DIRECTIVE)    # mandated verbatim
-    if f == "has_mycra":                                                     # §2A CRA rep authorization
-        notices.append(i18n.localize(
-            REP_AUTH_GUIDANCE.format(year=settings.tax_year, next_year=settings.tax_year + 1), lang))
+    # has_mycra == Yes is handled by the rep_auth_ack question (steps + "Ok" to continue).
+    if f == "has_mycra" and value == "No":                                   # §2A no account -> send NOA
+        notices.append(i18n.localize(REP_AUTH_NO.format(year=settings.tax_year), lang))
     if f == "landed_2024" and value == "Yes":                                # §2B world income
         notices.append(i18n.localize(WORLD_INCOME, lang))
 

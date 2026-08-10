@@ -29,14 +29,20 @@ def test_etransfer_email_shown_at_completion():
     assert "raviaccuratetax@gmail.com" in _payment_terms({"service_type": "Personal Tax"})
 
 
-def test_cra_rep_auth_guidance_shown():
+def test_cra_rep_auth_split_by_answer():
     from app.chat_engine import advance
     seed = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
             "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
-            "dob": "01/01/1990", "address": "1 St, Toronto M5V 3L9", "age": "36", "landed_2024": "No"}
-    reply, _ = advance(dict(seed), "Yes")     # answering has_mycra = Yes
-    assert "active CRA My Account" in reply and "6. Grant us Level 2" in reply
-    assert "2026 tuition credits" in reply and "2025 Notice of Assessment" in reply
+            "dob": "01/01/1990", "address": "1 St, Toronto M5V 3L9", "landed_2024": "No"}
+    s = dict(seed)
+    yes, _ = advance(s, "Yes")                # has_mycra = Yes -> rep-auth steps as their own step
+    assert "6. Grant us Level 2" in yes and "Reply 'Ok'" in yes
+    assert "Notice of Assessment" not in yes and "If yes" not in yes   # NO other-branch / labels
+    nxt, _ = advance(s, "Ok")                 # acknowledge -> proceed to marital status
+    assert "marital status" in nxt.lower()
+    no, _ = advance(dict(seed), "No")         # has_mycra = No -> only the NOA request
+    assert "Notice of Assessment" in no and "Grant us Level 2" not in no
+    assert "tuition" not in yes.lower() and "tuition" not in no.lower()   # tuition -> student question only
 
 
 def test_client_folder_and_categorized_form():
@@ -126,10 +132,10 @@ def test_completion_authorization_and_payment_flow():
     st = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
           "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
           "dob": "01/01/1990", "address": "1 St, Toronto M5V 3L9", "age": "36", "landed_2024": "No",
-          "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
+          "has_mycra": "Yes", "rep_auth_ack": "Ok", "marital_status": "Single", "filed_last_year": "Yes",
           "income_slips": "skip", "is_gig": "No", "owns_rental": "No", "first_home": "No",
           "has_medical": "No", "has_donations": "No", "has_gym": "No", "has_childcare": "No",
-          "has_northern_travel": "No", "is_student": "No", "rent_paid_2025": "0",
+          "lived_north": "No", "is_student": "No", "rent_paid_2025": "0",
           "province_changed": "No", "left_canada_date": "No", "additional_notes": "none",
           "third_party_payer": "No"}
     s = dict(st)
@@ -170,10 +176,11 @@ def test_future_dates_rejected():
     assert validate_answer("01/01/1990", _q("dob"))[0]
 
 
-def test_age_dob_cross_check():
-    from app.chat_engine import _age_vs_dob_error
-    assert _age_vs_dob_error("20", "01/01/1990")      # contradicts DOB → error string
-    assert not _age_vs_dob_error("36", "01/01/1990")  # matches → ""
+def test_age_computed_from_dob_not_asked():
+    from app.chat_engine import age_from_dob
+    from app.question_flow import QUESTIONS
+    assert "age" not in {q["field"] for q in QUESTIONS}   # age is never asked
+    assert age_from_dob("01/01/1990") == 36               # it's derived from DOB
 
 
 def test_named_company_fee_note():
@@ -213,7 +220,7 @@ def test_flow_reaches_address_after_core():
 
 
 def test_single_filer_skips_spouse_and_children():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Single")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", rep_auth_ack="Ok", marital_status="Single")
     # spouse + marital-date + children questions are all conditional → skipped for Single
     assert get_next_question(answers)["field"] == "filed_last_year"
 
@@ -236,25 +243,18 @@ def test_prefilled_existing_asked_to_confirm():
     assert get_next_question(answers)["field"] == "details_ok"
 
 
-def test_age_asked_before_marital_status():
-    answers = dict(CORE, address="1 King St")
-    assert get_next_question(answers)["field"] == "age"
-
-
-def test_age_bounds():
-    q = {"type": "number", "min": 0, "max": 120}
-    assert validate_answer("35", q)[0]
-    assert not validate_answer("500", q)[0]      # over max
-    assert not validate_answer("-2", q)[0]       # under min
+def test_age_not_asked_after_address():
+    answers = dict(CORE, address="1 King St, Toronto M5V 3L9")
+    assert get_next_question(answers)["field"] != "age"    # age question removed
 
 
 def test_married_flow_asks_marriage_date():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Married")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", rep_auth_ack="Ok", marital_status="Married")
     assert get_next_question(answers)["field"] == "marriage_date"
 
 
 def test_widowed_flow_asks_date_of_death():
-    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", marital_status="Widowed")
+    answers = dict(CORE, address="x", age="35", landed_2024="No", has_mycra="Yes", rep_auth_ack="Ok", marital_status="Widowed")
     assert get_next_question(answers)["field"] == "date_of_death"
 
 
@@ -320,10 +320,10 @@ def test_edit_field_at_review(monkeypatch):
     state = {"customer_status": "New Customer", "service_type": "Personal Tax", "full_name": "A B",
              "phone": "4160001234", "email": "old@x.com", "sin": "046454286", "sin_document": "skip",
              "dob": "01/01/1990", "address": "1 St", "age": "35", "landed_2024": "No",
-             "has_mycra": "Yes", "marital_status": "Single", "filed_last_year": "Yes",
+             "has_mycra": "Yes", "rep_auth_ack": "Ok", "marital_status": "Single", "filed_last_year": "Yes",
              "income_slips": "skip", "is_gig": "No", "owns_rental": "No",
              "first_home": "No", "has_medical": "No", "has_donations": "No",
-             "has_gym": "No", "has_childcare": "No", "has_northern_travel": "No", "is_student": "No",
+             "has_gym": "No", "has_childcare": "No", "lived_north": "No", "is_student": "No",
              "rent_paid_2025": "0", "province_changed": "No", "left_canada_date": "No",
              "additional_notes": "none", "third_party_payer": "No"}
     assert ce.get_next_question(state)["field"] == "confirmation"

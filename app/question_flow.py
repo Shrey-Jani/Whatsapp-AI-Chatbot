@@ -106,9 +106,8 @@ AUTHORIZATION_MSG = (
     "Please note: We will not submit your tax return until we receive your signed authorization.")
 
 # §2 CRA Access Authorization guidance. {year} = filing year, {next_year} = year credits carry to.
-REP_AUTH_GUIDANCE = (
-    "Do you have an active CRA My Account?\n\n"
-    "If yes:\n"
+# Shown only when the client HAS a CRA My Account (has_mycra == Yes).
+REP_AUTH_YES = (
     "Please add our Level 2 Authorized Representative by following these steps:\n\n"
     "1. Log in to your CRA My Account.\n"
     "2. Go to Profile.\n"
@@ -116,16 +115,14 @@ REP_AUTH_GUIDANCE = (
     "4. Choose Add a Representative.\n"
     "5. Enter our Representative ID.\n"
     "6. Grant us Level 2 authorization and submit.\n\n"
-    "This will allow us to:\n\n"
-    "- Check whether you have any {next_year} tuition credits available.\n"
+    "This will allow us to:\n"
     "- Review tax slips submitted by your employer, bank, college, or other institutions.\n"
     "- Help ensure all available information is included in your tax return, reducing the chances "
-    "of a future CRA reassessment.\n\n"
-    "If you do not have a CRA My Account:\n"
-    "Please send us your {year} Notice of Assessment (NOA) or your {year} Tax Summary. We will "
-    "check whether you have any tuition credits carried forward to {next_year}.\n\n"
-    "If you worked using your SIN and had income tax deducted, claiming available tuition credits "
-    "may help increase your tax refund.")                                                # §2 A
+    "of a future CRA reassessment.")                                                     # §2 A
+# Shown only when the client does NOT have a CRA My Account (has_mycra == No).
+REP_AUTH_NO = (
+    "No problem. Please send us your {year} Notice of Assessment (NOA) or your {year} Tax Summary "
+    "so we can review your prior assessment and any carry-forward amounts.")
 WORLD_INCOME = ("As you're new to Canada, we've noted your calendar year of landing. Please note: "
                 "you are legally required to report your preceding worldwide income in Canadian "
                 "dollars (CAD) - please call the CRA directly to report it.")            # §2 B
@@ -184,10 +181,7 @@ PERSONAL = [
     {"id": 7, "field": "address", "type": "textarea", "check": "postal",
      "prompt": "Your complete residential address (including postal code)?",
      "ai_parse": "Extract the full mailing address as a single line."},
-
-    {"id": 7.5, "field": "age", "type": "number", "min": 0, "max": 120,
-     "prompt": "What is your age?",
-     "ai_parse": "Extract the person's age as a whole number."},
+    # Age is NOT asked - it's computed from the date of birth (see chat_engine.age_from_dob).
 
     # Landing in Canada - asked before marital status.
     {"id": 22, "field": "landed_2024", "type": "boolean", "options": ["Yes", "No"],
@@ -200,6 +194,11 @@ PERSONAL = [
      "condition": lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") == "No",
      "prompt": "Do you have an active myCRA (CRA My Account) online account?",
      "ai_parse": "Return Yes or No."},
+
+    # Yes -> show the rep-authorization steps and wait for an "Ok" before continuing.
+    {"id": 23.35, "field": "rep_auth_ack", "type": "text", "condition": YES("has_mycra"),
+     "prompt": REP_AUTH_YES + "\n\nReply 'Ok' to continue.",
+     "ai_parse": "Return 'Ok'."},
 
     {"id": 23.6, "field": "noa_method", "type": "select",
      "condition": lambda a: a.get("has_mycra") == "No",
@@ -337,14 +336,14 @@ PERSONAL = [
     {"id": 45.3, "field": "has_gym", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Did you pay for any gym membership, fitness program, or other physical activity "
                "expenses during {year}?", "ai_parse": "Return Yes or No."},
-    {"id": 45.31, "field": "gym_province", "type": "text", "condition": YES("has_gym"),
-     "prompt": "Which province or territory did you live in on December 31, {year}?",
-     "ai_parse": "Extract the province/territory."},
-    {"id": 45.32, "field": "gym_amount", "type": "number", "min": 0, "condition": YES("has_gym"),
+    {"id": 45.31, "field": "gym_amount", "type": "number", "min": 0, "condition": YES("has_gym"),
      "prompt": "Total amount paid for gym/fitness/physical activity?", "ai_parse": "Amount as a number."},
-    {"id": 45.33, "field": "gym_receipt", "type": "file", "condition": YES("has_gym"),
+    {"id": 45.32, "field": "gym_receipt", "type": "file", "condition": YES("has_gym"),
      "prompt": "Please upload your gym/fitness receipt(s) or invoice(s) with 📎, then 'done' "
                "(or 'skip' if you don't have them).", "ai_parse": "File upload - handled separately."},
+    {"id": 45.33, "field": "gym_province", "type": "text", "condition": YES("has_gym"),
+     "prompt": "Which province or territory did you live in on December 31, {year}?",
+     "ai_parse": "Extract the province/territory."},
 
     # Child care expenses.
     {"id": 45.4, "field": "has_childcare", "type": "boolean", "options": ["Yes", "No"],
@@ -359,21 +358,26 @@ PERSONAL = [
      "prompt": "Please upload the child care receipt(s) or annual statement with 📎, then 'done' "
                "(or 'skip').", "ai_parse": "File upload - handled separately."},
 
-    # Northern residents / travel benefits (prescribed Zone A or Zone B).
-    {"id": 45.5, "field": "has_northern_travel", "type": "boolean", "options": ["Yes", "No"],
-     "prompt": "Did your employer provide travel benefits or reimburse you for travel because you "
-               "lived or worked in a prescribed Northern or Intermediate Zone (Zone A or Zone B) "
-               "during {year}?", "ai_parse": "Return Yes or No."},
-    {"id": 45.51, "field": "northern_t4", "type": "file", "condition": YES("has_northern_travel"),
+    # Northern residents / travel benefits - gated on actually having lived in a prescribed zone.
+    {"id": 45.5, "field": "lived_north", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Did you live or work in a prescribed Northern or Intermediate Zone (Zone A or "
+               "Zone B) during {year}? These are remote areas such as Yukon, the Northwest "
+               "Territories, Nunavut, and the far north of some provinces.",
+     "ai_parse": "Return Yes or No."},
+    {"id": 45.51, "field": "northern_zone", "type": "select", "condition": YES("lived_north"),
+     "options": ["Zone A (Northern)", "Zone B (Intermediate)", "Not sure"],
+     "prompt": "Was that Zone A (Northern Zone) or Zone B (Intermediate Zone)?",
+     "ai_parse": "Map to 'Zone A (Northern)', 'Zone B (Intermediate)', or 'Not sure'."},
+    {"id": 45.52, "field": "has_northern_travel", "type": "boolean", "options": ["Yes", "No"],
+     "condition": YES("lived_north"),
+     "prompt": "Did your employer provide travel benefits or reimburse you for travel during {year}?",
+     "ai_parse": "Return Yes or No."},
+    {"id": 45.53, "field": "northern_t4", "type": "file", "condition": YES("has_northern_travel"),
      "prompt": "Please upload your T4 slip with 📎, then 'done'.",
      "ai_parse": "File upload - handled separately."},
-    {"id": 45.52, "field": "northern_receipts", "type": "file", "condition": YES("has_northern_travel"),
+    {"id": 45.54, "field": "northern_receipts", "type": "file", "condition": YES("has_northern_travel"),
      "prompt": "Upload any travel receipts (airfare, hotel, etc.) with 📎, then 'done' "
                "(or 'skip' if none).", "ai_parse": "File upload - handled separately."},
-    {"id": 45.53, "field": "northern_zone", "type": "select", "condition": YES("has_northern_travel"),
-     "options": ["Zone A (Northern)", "Zone B (Intermediate)", "Not sure"],
-     "prompt": "Did you live or work in Zone A (Northern Zone) or Zone B (Intermediate Zone)?",
-     "ai_parse": "Map to 'Zone A (Northern)', 'Zone B (Intermediate)', or 'Not sure'."},
 
     # Student tuition credits - Yes triggers the NOA/Tax-Summary request (guidance shown in advance()).
     {"id": 45.6, "field": "is_student", "type": "boolean", "options": ["Yes", "No"],
