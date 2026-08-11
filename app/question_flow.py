@@ -113,7 +113,7 @@ REP_AUTH_YES = (
     "2. Go to Profile.\n"
     "3. Select Authorized Representative.\n"
     "4. Choose Add a Representative.\n"
-    "5. Enter our Representative ID.\n"
+    "5. Enter our Representative ID: 64HN5M7.\n"
     "6. Grant us Level 2 authorization and submit.\n\n"
     "This will allow us to:\n"
     "- Review tax slips submitted by your employer, bank, college, or other institutions.\n"
