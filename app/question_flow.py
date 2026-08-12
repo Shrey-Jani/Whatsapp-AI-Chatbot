@@ -249,6 +249,7 @@ _PERSONAL_RAW = [
      "ai_parse": "Map to one of: Single, Married, Common-Law, Divorced, Separated, Widowed."},
 
     {"id": 8.5, "field": "marital_changed", "type": "boolean", "options": ["Yes", "No"],
+     "condition": NOT_SINGLE,                    # a Single filer's status didn't change - skip only Single
      "prompt": "Did your marital status change in {year}?", "ai_parse": "Return Yes or No."},
     {"id": 8.6, "field": "marital_change_date", "type": "date", "condition": YES("marital_changed"),
      "prompt": "Date of change (DD/MM/YYYY)?", "ai_parse": "Date of change as DD/MM/YYYY."},
