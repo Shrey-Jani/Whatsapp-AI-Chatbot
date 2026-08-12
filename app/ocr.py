@@ -8,10 +8,14 @@ from .chat_engine import _safe_json
 from .config import settings
 
 PROMPT = (
-    "You are reading a Canadian tax slip. Identify the slip type "
-    "(T4, T5, T4A, T2202, or Other), the issuer, and the tax year, and extract the key "
-    "monetary boxes with their box numbers. Respond with ONLY JSON:\n"
-    '{"slip_type": "...", "issuer": "...", "tax_year": "...", '
+    "A client uploaded this document for their Canadian personal tax return. "
+    "First decide if it is a RELEVANT tax document: a tax slip (T4, T5, T4A, T2202, etc.), a "
+    "receipt or invoice, a bank/financial statement, a Notice of Assessment/Tax Summary, a SIN "
+    "document, or an e-transfer/payment screenshot. A selfie, a photo of a person, a landscape, a "
+    "meme, a chat screenshot, or any unrelated image is NOT relevant.\n"
+    "If it is a tax slip, also identify the slip type, issuer, tax year, and key monetary boxes.\n"
+    "Respond with ONLY JSON:\n"
+    '{"is_relevant": true or false, "slip_type": "...", "issuer": "...", "tax_year": "...", '
     '"boxes": {"<box>": "<amount>"}, "confidence": 0.0-1.0}'
 )
 

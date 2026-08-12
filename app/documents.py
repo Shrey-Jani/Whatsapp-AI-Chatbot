@@ -16,12 +16,17 @@ ALLOWED = {"application/pdf": "pdf", "image/jpeg": "img",
 
 def _parse(data: bytes, content_type: str, kind: str) -> dict:
     meta = ocr.extract_slip(data, content_type)          # Gemini vision - primary reader
+    relevant = meta.get("is_relevant")                   # vision relevance flag (absent if OCR off)
     unknown = str(meta.get("slip_type", "unknown")).lower() in ("unknown", "", "document")
     if unknown and kind == "pdf":                         # cheap fallback for text PDFs
         text = pdf_parser.extract_text_from_pdf(data)
         if text.strip():
             st = pdf_parser.identify_slip_type(text)
             meta = {"slip_type": st, **pdf_parser.extract_key_fields(text, st)}
+    if relevant is not None:
+        meta["is_relevant"] = relevant
+    if str(meta.get("slip_type", "")).lower() not in ("unknown", "", "document", "other"):
+        meta["is_relevant"] = True                        # a recognised slip is always relevant
     return meta
 
 
@@ -34,6 +39,9 @@ def handle_file_upload(db, tenant, sess, data: bytes, filename: str, content_typ
         return "Unsupported file type. Please upload a PDF, JPG, or PNG."
 
     meta = _parse(data, content_type, kind)
+    if meta.get("is_relevant") is False:                 # clearly not a tax/supporting document
+        return ("This doesn't look like a required document. Please upload a valid tax slip, "
+                "receipt, or supporting document - or type 'skip' if you don't have one.")
     slip_type = meta.get("slip_type") or "unknown"
     employer = meta.get("employer_name") or meta.get("issuer")
     income = meta.get("income_amount")
