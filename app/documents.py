@@ -5,11 +5,26 @@ primary reader (accurate on real slip layouts); pdfplumber is a cheap fallback f
 when vision can't identify the slip. Full parsed data is saved to the Document for the firm;
 the user only sees a short "<slip> received." confirmation.
 """
-from . import ocr, pdf_parser, storage, submission
+from . import llm, ocr, pdf_parser, storage, submission
 from .config import settings
 from .models import Document
 
 MAX_BYTES = 5 * 1024 * 1024
+
+
+def _text_is_tax_doc(text: str) -> bool | None:
+    """Ask the (text) LLM whether extracted PDF text is a tax/supporting document. None = unsure."""
+    if not llm.configured() or not (text or "").strip():
+        return None
+    try:
+        ans = llm.complete(
+            "Is the document below a Canadian tax slip, receipt, invoice, bank/financial statement, "
+            "Notice of Assessment/Tax Summary, or other tax-return supporting document? "
+            "Answer with only YES or NO.\n\n" + text[:3000]).strip().upper()
+        return True if ans.startswith("YES") else False if ans.startswith("NO") else None
+    except Exception as e:
+        print(f"[documents] text relevance check failed: {e}")
+        return None
 ALLOWED = {"application/pdf": "pdf", "image/jpeg": "img",
            "image/jpg": "img", "image/png": "img"}
 
@@ -23,6 +38,8 @@ def _parse(data: bytes, content_type: str, kind: str) -> dict:
         if text.strip():
             st = pdf_parser.identify_slip_type(text)
             meta = {"slip_type": st, **pdf_parser.extract_key_fields(text, st)}
+            if relevant is None and str(st).lower() in ("unknown", "", "document", "other"):
+                relevant = _text_is_tax_doc(text)         # vision off -> classify the text instead
     if relevant is not None:
         meta["is_relevant"] = relevant
     if str(meta.get("slip_type", "")).lower() not in ("unknown", "", "document", "other"):
