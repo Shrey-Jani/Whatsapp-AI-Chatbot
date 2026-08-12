@@ -4,11 +4,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import pdf_generator, storage
+from . import chat_engine, pdf_generator, storage
 from .config import settings
 from .database import get_db
-from .models import Client, Document, Escalation, Submission
+from .models import ChatSession, Client, Document, Escalation, Submission, Tenant
 from .security import reveal_sin
+from .whatsapp import send_text
 
 
 def require_admin(x_admin_key: str = Header(default="")):
@@ -92,3 +93,29 @@ async def escalations(db: AsyncSession = Depends(get_db)):
                              .order_by(Escalation.created_at.desc()))).all()
     return [{"id": e.id, "session_id": e.session_id, "reason": e.reason,
              "created_at": e.created_at.isoformat()} for e in rows]
+
+
+@router.post("/escalations/{esc_id}/resolve")
+async def resolve_escalation(esc_id: int, db: AsyncSession = Depends(get_db)):
+    """Staff resolved it - clear the hand-off and pick the client's chat back up where it stopped.
+
+    On WhatsApp the bot proactively re-sends the next question so the conversation continues.
+    """
+    esc = await db.get(Escalation, esc_id)
+    if esc is None:
+        raise HTTPException(404, "not found")
+    esc.resolved = True
+    sess = await db.get(ChatSession, esc.session_id)
+    if sess is not None:
+        state = dict(sess.conversation_state_json or {})
+        resume = chat_engine.resume_message(state)     # clears escalation, builds the continue message
+        sess.conversation_state_json = state
+        if sess.channel == "whatsapp" and sess.wa_number:   # push the next question to the client
+            tenant = await db.get(Tenant, sess.tenant_id)
+            if tenant is not None:
+                try:
+                    await send_text(tenant, sess.wa_number, resume)
+                except Exception as e:
+                    print(f"[admin] resume send failed: {e}")
+    await db.commit()
+    return {"resolved": True}

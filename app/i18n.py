@@ -1,17 +1,19 @@
 """Multilingual layer - detect the user's language + script once, then speak it back.
 
-English passes through untouched (no LLM call, no drift, no cost). Non-English prompts are
-translated and cached: the question set is fixed, so each prompt is translated once ever.
+Supported languages: English and Punjabi only (Hindi is NOT supported - a Hindi or any other
+message is served in English). English passes through untouched (no LLM call, no drift, no cost).
+Punjabi prompts are translated and cached: the question set is fixed, so each prompt is translated
+once ever.
 
 Mandated verbatim legal text (slip safeguard, GST warning, no-refund policy) is NEVER sent
-through here - those stay in English until a human translator signs off the Punjabi/Hindi.
+through here - those stay in English until a human translator signs off the Punjabi.
 """
 from functools import lru_cache
 
 from . import llm
 
 DEFAULT = "English"
-VALID = {"English", "Hindi/Latin", "Hindi/Devanagari", "Punjabi/Latin", "Punjabi/Gurmukhi"}
+VALID = {"English", "Punjabi/Latin", "Punjabi/Gurmukhi"}
 
 _SCRIPT_RULE = ("Write using ordinary English/Latin letters (romanised) - do NOT use "
                 "Devanagari or Gurmukhi characters.")
@@ -30,10 +32,10 @@ def detect(text: str) -> str:
         out = llm.complete(
             "Identify the language and script of the message below.\n"
             "Answer with EXACTLY one of these labels and nothing else:\n"
-            "English | Hindi/Latin | Hindi/Devanagari | Punjabi/Latin | Punjabi/Gurmukhi\n\n"
-            "Rules: if it is Hindi or Punjabi typed with English letters, pick the /Latin label. "
-            "Punjabi markers include: paji, tuhada, ki haal, vadhiya, sat sri akal, kiddan. "
-            "Hindi markers include: kaise/kese ho, aap, kya, theek, namaste.\n\n"
+            "English | Punjabi/Latin | Punjabi/Gurmukhi\n\n"
+            "Rules: Punjabi typed with English letters -> Punjabi/Latin; Punjabi in Gurmukhi script "
+            "-> Punjabi/Gurmukhi. Punjabi markers: paji, tuhada, ki haal, vadhiya, sat sri akal, "
+            "kiddan. If the message is English, Hindi, or ANY other language, pick English.\n\n"
             f'Message: "{text}"').strip().splitlines()[0].strip().strip(".")
         return out if out in VALID else DEFAULT
     except Exception as e:
@@ -60,7 +62,7 @@ def localize(text: str, lang: str) -> str:
         return text
 
 
-GREETING = "Hello! How are you?"
+GREETING = "Hello!"
 
 
 def greet_and_ask(user_text: str, question: str, lang: str) -> str:

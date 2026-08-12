@@ -1,8 +1,11 @@
+from datetime import datetime
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     # LLM - swap providers with one env var; no code change needed.
     llm_provider: str = "gemini"            # gemini | groq
@@ -33,8 +36,14 @@ class Settings(BaseSettings):
     # Admin dashboard
     admin_password: str = "changeme"
 
-    # Active filing year - slips are auto-matched against this.
-    tax_year: int = 2025
+    # Filing year. Leave TAX_YEAR unset to auto-derive from the current date (advances every
+    # Jan 1, no yearly edits); set TAX_YEAR to pin a specific year. All {year} prompts, the
+    # landing/"filed last year" questions (year-1), and slip matching follow this one value.
+    tax_year_override: int = Field(default=0, validation_alias="TAX_YEAR")
+
+    @property
+    def tax_year(self) -> int:
+        return self.tax_year_override or datetime.now().year
 
     # Firm e-Transfer address shown to clients at payment (from the client's checklist cards).
     etransfer_email: str = "raviaccuratetax@gmail.com"

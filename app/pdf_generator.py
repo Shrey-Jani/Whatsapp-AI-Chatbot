@@ -88,9 +88,12 @@ def build_summary_pdf(data: dict, documents: list, branding: dict, submission_id
                 ("Spouse SIN", data.get("spouse_sin")), ("Spouse income", data.get("spouse_income")),
                 ("Spouse address", data.get("spouse_address")),
                 ("Spouse in Canada", data.get("spouse_in_canada"))]
-    for label, key in [("Marriage date", "marriage_date"), ("Cohabitation date", "cohabitation_date"),
-                       ("Divorce date", "divorce_date"), ("Separation date", "separation_date"),
-                       ("Spouse date of death", "date_of_death")]:
+    for label, key in [("Marital status changed", "marital_changed"),
+                       ("Date of change", "marital_change_date"),
+                       ("Spouse phone", "spouse_phone"), ("Spouse email", "spouse_email"),
+                       ("Spouse landing date", "spouse_landing_date"),
+                       ("Child born this year", "child_born_this_year"),
+                       ("Newborn details", "newborn_details")]:
         if data.get(key):
             fam.append((label, data.get(key)))
     if data.get("has_children") == "Yes":

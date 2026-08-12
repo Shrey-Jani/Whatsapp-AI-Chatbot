@@ -29,7 +29,7 @@
 
     <h1 style="margin-top:32px;">Open Escalations</h1>
     <table id="esc">
-      <thead><tr><th>Reason</th><th>Session</th><th>When</th></tr></thead>
+      <thead><tr><th>Reason</th><th>Session</th><th>When</th><th>Action</th></tr></thead>
       <tbody></tbody>
     </table>
   </main>
@@ -70,8 +70,14 @@
       const rows = await (await api("/api/admin/escalations")).json();
       document.querySelector("#esc tbody").innerHTML = rows.map(e =>
         `<tr><td>${e.reason}</td><td>${e.session_id}</td>` +
-        `<td>${(e.created_at || "").slice(0, 16).replace("T", " ")}</td></tr>`).join("")
-        || `<tr><td colspan="3">None</td></tr>`;
+        `<td>${(e.created_at || "").slice(0, 16).replace("T", " ")}</td>` +
+        `<td><button onclick="resolveEsc(${e.id})">Resolve &amp; resume</button></td></tr>`).join("")
+        || `<tr><td colspan="4">None</td></tr>`;
+    }
+
+    async function resolveEsc(id) {
+      await api(`/api/admin/escalations/${id}/resolve`, { method: "POST" });
+      loadEscalations();                 // clears it; on WhatsApp the client's chat resumes automatically
     }
 
     function render() {

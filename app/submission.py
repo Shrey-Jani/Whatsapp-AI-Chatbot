@@ -17,10 +17,11 @@ from .security import digits, protect_sin, reveal_sin
 # Year-specific answers (income, rent, this year's changes) are always re-asked.
 STABLE_FIELDS = {
     "full_name", "phone", "email", "dob", "address", "marital_status",
-    "marriage_date", "cohabitation_date", "divorce_date", "separation_date", "date_of_death",
     "spouse_in_canada", "spouse_name", "spouse_dob", "spouse_sin", "spouse_income",
-    "spouse_address", "has_children", "children_details", "sin_document",
+    "spouse_address", "spouse_phone", "spouse_email", "spouse_landing_date",
+    "has_children", "children_details", "sin_document",
 }   # note: spouse_sin is NOT prefilled - it's encrypted and kept out of the JSON blob
+# marital_changed / child_born_this_year are year-specific -> always re-asked, not prefilled.
 # Recurring tax details also carried over (last year's values - the confirmation step lets the
 # customer update anything that changed).
 TAX_FIELDS = {

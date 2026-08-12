@@ -12,11 +12,35 @@ are intentionally NOT here (collection only) - they land in the pricing phase.
 """
 
 
+import re
+
+
 def _num(a: dict, field: str) -> float:
     try:
         return float(str(a.get(field, "0")).replace("$", "").replace(",", "").strip())
     except (ValueError, TypeError):
         return 0.0
+
+
+# Province detection from the Canadian postal code (first letter -> province). Deterministic, no API.
+_POSTAL_RE = re.compile(r"\b([A-Za-z])\d[A-Za-z]\s*\d[A-Za-z]\d\b")
+QUEBEC_LETTERS = frozenset("GHJ")             # Quebec - not serviced
+GYM_PROVINCE_LETTERS = frozenset("RAYBS")     # Manitoba, Newfoundland&Labrador, Yukon, Nova Scotia, Saskatchewan
+NORTHERN_LETTERS = frozenset("XY")            # NWT/Nunavut, Yukon (territories)
+
+
+def postal_letter(address: str) -> str:
+    """First letter of the Canadian postal code in the address, uppercased ('' if none found)."""
+    m = _POSTAL_RE.search(address or "")
+    return m.group(1).upper() if m else ""
+
+
+def in_quebec(a: dict) -> bool:
+    return postal_letter(a.get("address", "")) in QUEBEC_LETTERS
+
+
+GYM_ELIGIBLE = lambda a: postal_letter(a.get("address", "")) in GYM_PROVINCE_LETTERS   # noqa: E731
+IS_NORTHERN = lambda a: postal_letter(a.get("address", "")) in NORTHERN_LETTERS         # noqa: E731
 
 
 def _left_canada(a: dict) -> bool:
@@ -66,13 +90,13 @@ ETRANSFER_DIRECTIVE = ("You must successfully submit the complete fee amount via
 PROCUREMENT_SLA = ("Same-day acquisition of your GST number is targeted via automated routing. "
                    "If manual filing exceptions occur, processing via official form submissions "
                    "can take 2 to 3 weeks.")                                              # §4
-RENT_NO_PROOF_GUIDANCE = (                                                       # §3 rent, correct year
-    "We do not require rent receipts or landlord details to prepare and file your tax return. "
-    "The total amount of rent you paid in {year} is sufficient for tax filing.\n\n"
-    "However, the CRA may ask you to provide proof of rent paid (rent receipts or landlord "
-    "information) at a later date for verification. If you cannot provide it, the CRA may deny "
-    "the rent claim and ask you to repay any related benefits, such as the Ontario Trillium "
-    "Benefit, if applicable.")
+RENT_NO_PROOF_GUIDANCE = (                                                       # rent/property tax proof
+    "You don't need to upload proof now. However, the CRA may ask for proof later.\n\n"
+    "Acceptable proof may include:\n"
+    "- E-transfer / payment records to your landlord\n"
+    "- Lease agreement in your name\n"
+    "- A letter or rent receipt signed by your landlord confirming the total rent paid\n"
+    "- Property tax bill / receipt, if applicable")
 TUITION_CREDIT_GUIDANCE = (                                                      # student tuition credits
     "If you are or were a student, you may have unused tuition tax credits available.\n\n"
     "Please send us your {year} Notice of Assessment (NOA) or your {year} Tax Summary so we can "
@@ -135,13 +159,20 @@ CUSTOMER_Q = {"id": -1, "field": "customer_status", "type": "select",
               "ai_parse": "Map to exactly 'New Customer' or 'Existing Customer'."}
 
 SERVICE_Q = {"id": 0, "field": "service_type", "type": "select",
-             "options": ["Personal Tax", "Corporate Tax", "GST/HST", "Business Registration", "Others"],
-             "prompt": "What type of tax would you like to file for?",
-             "ai_parse": ("Map to one of: Personal Tax, Corporate Tax, GST/HST, "
+             "options": ["Personal or Individual Tax", "Corporate Tax", "GST/HST", "Business Registration", "Others"],
+             "hide_options": True,               # the prompt lists the numbered menu itself
+             "prompt": "Thank you for contacting Accurate Tax Services. How can we help you today?\n"
+                       "Please type\n"
+                       "1 for Personal or Individual Tax\n"
+                       "2 for Corporate Tax\n"
+                       "3 for GST/HST\n"
+                       "4 for Business Registration\n"
+                       "5 for Others",
+             "ai_parse": ("Map to one of: Personal or Individual Tax, Corporate Tax, GST/HST, "
                           "Business Registration, Others.")}
 
 # Personal (Type-1)
-PERSONAL = [
+_PERSONAL_RAW = [
     # Existing customers are matched by SIN up front, so we can pre-fill their profile from
     # their last filing. New customers get the SIN at its normal spot below.
     {"id": 2, "field": "sin", "type": "text", "check": "sin",
@@ -185,9 +216,10 @@ PERSONAL = [
 
     # Landing in Canada - asked before marital status.
     {"id": 22, "field": "landed_2024", "type": "boolean", "options": ["Yes", "No"],
-     "prompt": "Did you land / arrive in Canada in 2024?", "ai_parse": "Return Yes or No."},
-    {"id": 23, "field": "landing_date", "type": "date", "year": 2024, "condition": YES("landed_2024"),
-     "prompt": "Your exact landing date in Canada in 2024 (DD/MM/YYYY)?", "ai_parse": "Landing date DD/MM/YYYY."},
+     "prompt": "Did you land / arrive in Canada in {prev_year}?", "ai_parse": "Return Yes or No."},
+    {"id": 23, "field": "landing_date", "type": "date", "year": "prev_year", "condition": YES("landed_2024"),
+     "prompt": "Your exact landing date in Canada in {prev_year} (DD/MM/YYYY)?",
+     "ai_parse": "Landing date DD/MM/YYYY."},
 
     # §2 CRA Access Authorization - new-to-firm clients residing in Canada (not brand-new arrivals).
     {"id": 23.3, "field": "has_mycra", "type": "boolean", "options": ["Yes", "No"],
@@ -216,16 +248,10 @@ PERSONAL = [
      "prompt": "Your marital status?",
      "ai_parse": "Map to one of: Single, Married, Common-Law, Divorced, Separated, Widowed."},
 
-    {"id": 9, "field": "marriage_date", "type": "date", "condition": _is("Married"),
-     "prompt": "Your exact marriage date (DD/MM/YYYY)?", "ai_parse": "Marriage date as DD/MM/YYYY."},
-    {"id": 10, "field": "cohabitation_date", "type": "date", "condition": _is("Common-Law"),
-     "prompt": "The date you began living together (DD/MM/YYYY)?", "ai_parse": "Cohabitation date DD/MM/YYYY."},
-    {"id": 11, "field": "divorce_date", "type": "date", "condition": _is("Divorced"),
-     "prompt": "Your exact date of divorce (DD/MM/YYYY)?", "ai_parse": "Divorce date DD/MM/YYYY."},
-    {"id": 12, "field": "separation_date", "type": "date", "condition": _is("Separated"),
-     "prompt": "Your exact date of separation (DD/MM/YYYY)?", "ai_parse": "Separation date DD/MM/YYYY."},
-    {"id": 13, "field": "date_of_death", "type": "date", "condition": _is("Widowed"),
-     "prompt": "Your spouse's exact date of death (DD/MM/YYYY)?", "ai_parse": "Date of death DD/MM/YYYY."},
+    {"id": 8.5, "field": "marital_changed", "type": "boolean", "options": ["Yes", "No"],
+     "prompt": "Did your marital status change in {year}?", "ai_parse": "Return Yes or No."},
+    {"id": 8.6, "field": "marital_change_date", "type": "date", "condition": YES("marital_changed"),
+     "prompt": "Date of change (DD/MM/YYYY)?", "ai_parse": "Date of change as DD/MM/YYYY."},
 
     {"id": 14, "field": "spouse_in_canada", "type": "boolean", "options": ["Yes", "No"],
      "condition": MARRIED, "prompt": "Is your spouse currently living in Canada?",
@@ -234,23 +260,37 @@ PERSONAL = [
      "prompt": "Your spouse's full legal name?", "ai_parse": "Extract the spouse's full legal name."},
     {"id": 16, "field": "spouse_dob", "type": "date", "condition": MARRIED,
      "prompt": "Your spouse's date of birth (DD/MM/YYYY)?", "ai_parse": "Spouse DOB DD/MM/YYYY."},
-    {"id": 17, "field": "spouse_sin", "type": "text", "check": "sin", "condition": SPOUSE_HERE,
-     "prompt": "Your spouse's SIN (9 digits)?", "ai_parse": "Extract 9-digit SIN, digits only."},
-    {"id": 18, "field": "spouse_income", "type": "text", "condition": SPOUSE_HERE,
-     "prompt": "Your spouse's approximate annual income?", "ai_parse": "Spouse income as free text."},
+    {"id": 16.5, "field": "spouse_income", "type": "text", "condition": MARRIED,   # form: income both in/out of Canada
+     "prompt": "Your spouse's approximate {year} income?", "ai_parse": "Spouse income as free text."},
+    {"id": 17, "field": "spouse_sin", "type": "text", "check": "sin_optional", "condition": SPOUSE_HERE,
+     "prompt": "Your spouse's SIN (9 digits), or reply 'skip' if they don't have one / aren't working.",
+     "ai_parse": "Extract a 9-digit SIN (digits only), or 'skip'."},
+    {"id": 17.3, "field": "spouse_phone", "type": "phone", "condition": SPOUSE_HERE,
+     "prompt": "Your spouse's phone number?", "ai_parse": "Extract a phone number; digits only."},
+    {"id": 17.4, "field": "spouse_email", "type": "email", "condition": SPOUSE_HERE,
+     "prompt": "Your spouse's email address?", "ai_parse": "Extract the email address, lowercased."},
     {"id": 19, "field": "spouse_address", "type": "text", "condition": SPOUSE_HERE,
      "prompt": "Your spouse's address (if different; else 'same')?", "ai_parse": "Spouse address or 'same'."},
+    {"id": 19.5, "field": "spouse_landing_date", "type": "text", "check": "date_or_no", "condition": SPOUSE_HERE,
+     "prompt": "Your spouse's landing date in Canada (DD/MM/YYYY), if a newcomer; else 'No'.",
+     "ai_parse": "Landing date DD/MM/YYYY, or 'No'."},
 
     {"id": 20, "field": "has_children", "type": "boolean", "options": ["Yes", "No"],
      "condition": NOT_SINGLE, "prompt": "Do you have any children or dependents?",
      "ai_parse": "Return Yes or No."},
+    {"id": 21.5, "field": "child_born_this_year", "type": "boolean", "options": ["Yes", "No"],
+     "condition": YES("has_children"), "prompt": "Was a child born in {year}?",
+     "ai_parse": "Return Yes or No."},
+    {"id": 21.6, "field": "newborn_details", "type": "text", "condition": YES("child_born_this_year"),
+     "prompt": "The newborn's full name and date of birth (DD/MM/YYYY)?",
+     "ai_parse": "Extract the child's full name and date of birth."},
     {"id": 21, "field": "children_details", "type": "textarea", "condition": YES("has_children"),
      "prompt": "List EACH child/dependent - full name, DOB (DD/MM/YYYY), and SIN if available "
                "(SIN optional). Include children whether or not they live with you.",
      "ai_parse": "Return the child/dependent details as given."},
 
     {"id": 24, "field": "filed_last_year", "type": "boolean", "options": ["Yes", "No"],
-     "condition": FILED_Q, "prompt": "Did you file a Canadian tax return last year (2024)?",
+     "condition": FILED_Q, "prompt": "Did you file a Canadian tax return last year ({prev_year})?",
      "ai_parse": "Return Yes or No."},
 
     {"id": 25, "field": "income_slips", "type": "file",
@@ -267,7 +307,7 @@ PERSONAL = [
                  "possible, but you can still proceed with your tax return if some slips are not "
                  "yet available.",
      "prompt": "Please upload ALL your slips - several at once is fine. Include income slips "
-               "(T4, T4A, T5, T2202A) and any province-specific slips. Tap 📎, select every file "
+               "(T4, T4A, T5, RRSP, FHSA, T2202) and any province-specific slips. Tap 📎, select every file "
                "(photo or PDF), then type 'done'. Type 'skip' if you have none.\n\n"
                "If you have any documents to share other than your income slips, please send them "
                "as well. These may include documents related to medical expenses, rent, childcare, "
@@ -332,8 +372,9 @@ PERSONAL = [
      "prompt": "Please upload your donation receipts with 📎, and enter the total donated here.",
      "ai_parse": "Extract the total donation amount."},
 
-    # Gym / physical-activity expenses (eligibility depends on province of residence).
+    # Gym / physical-activity expenses - only in provinces that offer the credit (from postal code).
     {"id": 45.3, "field": "has_gym", "type": "boolean", "options": ["Yes", "No"],
+     "condition": GYM_ELIGIBLE,
      "prompt": "Did you pay for any gym membership, fitness program, or other physical activity "
                "expenses during {year}?", "ai_parse": "Return Yes or No."},
     {"id": 45.31, "field": "gym_amount", "type": "number", "min": 0, "condition": YES("has_gym"),
@@ -347,6 +388,7 @@ PERSONAL = [
 
     # Child care expenses.
     {"id": 45.4, "field": "has_childcare", "type": "boolean", "options": ["Yes", "No"],
+     "condition": YES("has_children"),           # only clients who have children/dependents
      "prompt": "Did you pay any child care expenses during {year}? (daycare, nursery, preschool, "
                "babysitting, day camp, before/after-school care)", "ai_parse": "Return Yes or No."},
     {"id": 45.41, "field": "childcare_details", "type": "textarea", "condition": YES("has_childcare"),
@@ -358,8 +400,25 @@ PERSONAL = [
      "prompt": "Please upload the child care receipt(s) or annual statement with 📎, then 'done' "
                "(or 'skip').", "ai_parse": "File upload - handled separately."},
 
-    # Northern residents / travel benefits - gated on actually having lived in a prescribed zone.
+    # Children's sports / fitness / physical-activity expenses (only clients who have children).
+    {"id": 45.45, "field": "has_child_fitness", "type": "boolean", "options": ["Yes", "No"],
+     "condition": YES("has_children"),
+     "prompt": "Did you pay any sports, fitness, or physical activity expenses for your child "
+               "during {year}?", "ai_parse": "Return Yes or No."},
+    {"id": 45.46, "field": "child_fitness_province", "type": "text", "condition": YES("has_child_fitness"),
+     "prompt": "Which province or territory did you live in on December 31, {year}?",
+     "ai_parse": "Extract the province/territory."},
+    {"id": 45.47, "field": "child_fitness_amount", "type": "number", "min": 0,
+     "condition": YES("has_child_fitness"),
+     "prompt": "Total amount paid for your child's sports/fitness/physical activity?",
+     "ai_parse": "Amount as a number."},
+    {"id": 45.48, "field": "child_fitness_receipt", "type": "file", "condition": YES("has_child_fitness"),
+     "prompt": "Please upload your child's sports/fitness receipt(s) or invoice(s) with 📎, then "
+               "'done' (or 'skip' if you don't have them).", "ai_parse": "File upload - handled separately."},
+
+    # Northern residents / travel benefits - only for territory postal codes (Yukon, NWT, Nunavut).
     {"id": 45.5, "field": "lived_north", "type": "boolean", "options": ["Yes", "No"],
+     "condition": IS_NORTHERN,
      "prompt": "Did you live or work in a prescribed Northern or Intermediate Zone (Zone A or "
                "Zone B) during {year}? These are remote areas such as Yukon, the Northwest "
                "Territories, Nunavut, and the far north of some provinces.",
@@ -379,20 +438,23 @@ PERSONAL = [
      "prompt": "Upload any travel receipts (airfare, hotel, etc.) with 📎, then 'done' "
                "(or 'skip' if none).", "ai_parse": "File upload - handled separately."},
 
-    # Student tuition credits - Yes triggers the NOA/Tax-Summary request (guidance shown in advance()).
+    # Student - upload the T2202 tuition slip; if not available yet, capture full/part-time + completion.
     {"id": 45.6, "field": "is_student", "type": "boolean", "options": ["Yes", "No"],
-     "prompt": "Are you, or were you, a student?", "ai_parse": "Return Yes or No."},
-    {"id": 45.61, "field": "tuition_noa", "type": "file", "condition": YES("is_student"),
-     "prompt": "Please upload your {year} Notice of Assessment (NOA) or {year} Tax Summary with 📎, "
-               "then 'done' (or 'skip' if you don't have it handy).",
-     "ai_parse": "File upload - handled separately."},
+     "prompt": "Were you a student at any time during {year} (full-time or part-time)?",
+     "ai_parse": "Return Yes or No."},
+    {"id": 45.61, "field": "tuition_t2202", "type": "file", "condition": YES("is_student"),
+     "prompt": "Please upload your {year} tuition slip (T2202) with 📎, then 'done' "
+               "(or 'skip' if it's not yet available).", "ai_parse": "File upload - handled separately."},
+    {"id": 45.62, "field": "student_type", "type": "select", "options": ["Full-time", "Part-time"],
+     "condition": YES("is_student"),
+     "prompt": "Were you a full-time or part-time student?", "ai_parse": "Map to 'Full-time' or 'Part-time'."},
+    {"id": 45.63, "field": "student_completion", "type": "text", "condition": YES("is_student"),
+     "prompt": "Your program completion date, or expected completion date (DD/MM/YYYY)?",
+     "ai_parse": "Extract the completion date."},
 
     {"id": 47, "field": "rent_paid_2025", "type": "number", "min": 0,
-     "prompt": "Total rent you paid as a tenant in {year} (enter 0 if none)?",
-     "ai_parse": "Rent amount as a number."},
-    {"id": 48, "field": "rent_proof", "type": "boolean", "options": ["Yes", "No"],
-     "condition": lambda a: _num(a, "rent_paid_2025") > 0,
-     "prompt": "Do you have proof of rent (receipts / landlord details)?", "ai_parse": "Return Yes or No."},
+     "prompt": "Total rent or property tax you paid in {year} (enter 0 if none)?",
+     "ai_parse": "Rent or property tax amount as a number."},
 
     {"id": 49, "field": "province_changed", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Did you change your province of residence during {year}?", "ai_parse": "Return Yes or No."},
@@ -426,7 +488,7 @@ PERSONAL = [
      "prompt": "Upload your moving-expense receipt(s) with 📎, then 'done' (or 'skip').",
      "ai_parse": "File upload - handled separately."},
     {"id": 51, "field": "left_canada_date", "type": "text", "check": "date_or_no",
-     "prompt": "If you left/plan to leave Canada in 2025, enter the date (DD/MM/YYYY); else 'No'.",
+     "prompt": "If you left/plan to leave Canada in {year}, enter the date (DD/MM/YYYY); else 'No'.",
      "ai_parse": "Departure date DD/MM/YYYY, or 'No'."},
     {"id": 52, "field": "spouse_left_canada_date", "type": "text", "check": "date_or_no", "condition": SPOUSE_LEFT,
      "prompt": "Your spouse's date of leaving Canada (DD/MM/YYYY), if applicable; else 'No'.",
@@ -448,6 +510,50 @@ PERSONAL = [
      "prompt": "Type YES to confirm everything above is accurate - or tell me what to change (e.g. 'change email').",
      "ai_parse": "Return YES if confirmed, else NO."},
 ]
+
+
+# The firm's Client Information Form dictates the order. The questions are authored above (grouped
+# as written); here we resequence them into the form's top-to-bottom order - so conditions and
+# content stay put and only the order changes. Any field not listed falls to the end (safety).
+def _reorder(raw, sections):
+    remaining = list(raw)
+    out = []
+    for sec in sections:
+        for fld in sec:
+            for i, q in enumerate(remaining):
+                if q["field"] == fld:
+                    out.append(remaining.pop(i))
+                    break
+    out.extend(remaining)
+    return out
+
+
+_PERSONAL_SECTIONS = [
+    # Personal information (+ marital, per the form's Personal section)
+    ["sin", "details_ok", "full_name", "phone", "email", "sin", "sin_document", "dob", "address"],
+    ["marital_status", "marital_changed", "marital_change_date"],
+    ["is_student", "tuition_t2202", "student_type", "student_completion"],                      # Student
+    ["landed_2024", "landing_date", "has_mycra", "rep_auth_ack", "noa_method", "filed_last_year"],  # Newcomer/CRA
+    ["rent_paid_2025"],                                                                          # Rent
+    ["income_slips"],                                                                            # Income/slips
+    ["is_gig", "gig_platforms", "gig_cash", "gig_has_gst", "gig_netfile",                        # extra deductions
+     "owns_rental", "rental_address", "rental_gross_income", "rental_mortgage_interest",
+     "rental_property_tax", "rental_expenses", "rental_ownership", "rental_partners",
+     "first_home", "first_home_details", "has_medical", "medical_details",
+     "has_donations", "donations_note", "has_gym", "gym_amount", "gym_receipt", "gym_province",
+     "lived_north", "northern_zone", "has_northern_travel", "northern_t4", "northern_receipts"],
+    ["has_children", "child_born_this_year", "newborn_details", "children_details",              # Children
+     "has_childcare", "childcare_details", "childcare_receipt",
+     "has_child_fitness", "child_fitness_province", "child_fitness_amount", "child_fitness_receipt"],
+    ["spouse_in_canada", "spouse_name", "spouse_dob", "spouse_income", "spouse_sin",             # Spouse
+     "spouse_phone", "spouse_email", "spouse_address", "spouse_landing_date"],
+    ["province_changed", "move_date", "province_from", "province_to", "move_reason",             # Province change
+     "move_40km", "move_expenses", "move_receipts"],
+    ["left_canada_date", "spouse_left_canada_date"],                                             # Leaving Canada
+    ["third_party_payer", "payer_details", "additional_notes", "confirmation"],                  # Wrap-up
+]
+PERSONAL = _reorder(_PERSONAL_RAW, _PERSONAL_SECTIONS)
+
 
 # ---------------------------------------------------------------- Corporate Tax (Section 5)
 CORPORATE = [
@@ -480,7 +586,7 @@ CORPORATE = [
      "ai_parse": "Extract the GST number or 'none'."},
     {"id": 110, "field": "corp_gst_reporting", "type": "text", "check": "period",
      "condition": lambda a: (a.get("corp_gst_number") or "").lower() != "none",
-     "prompt": "Corporate GST reporting period? (e.g. Jan 2025 - Dec 2025)",
+     "prompt": "Corporate GST reporting period? (e.g. Jan {year} - Dec {year})",
      "ai_parse": "Extract the reporting period."},
     {"id": 111, "field": "corp_gst_access", "type": "text", "check": "code",
      "condition": lambda a: (a.get("corp_gst_number") or "").lower() != "none",
@@ -534,7 +640,7 @@ GST = [
      "prompt": "Your 9-digit GST number?", "ai_parse": "Extract the GST number."},
     {"id": 209, "field": "gst_reporting_period", "type": "text", "check": "period",
      "condition": EQ("gst_service", "File a GST Return"),
-     "prompt": "Your GST reporting period? (e.g. Jan 2025 - Dec 2025)",
+     "prompt": "Your GST reporting period? (e.g. Jan {year} - Dec {year})",
      "ai_parse": "Extract the reporting period."},
     {"id": 210, "field": "gst_access_code", "type": "text", "check": "code",
      "condition": EQ("gst_service", "File a GST Return"),
@@ -606,18 +712,17 @@ OTHERS = [
 ]
 
 # Services that end with authorization + payment (everything except an "Others" enquiry).
-FILING_SERVICES = ("Personal Tax", "Corporate Tax", "GST/HST", "Business Registration")
+FILING_SERVICES = ("Personal or Individual Tax", "Corporate Tax", "GST/HST", "Business Registration")
 
 # Shared completion steps - asked after each filing workflow's own confirmation (untagged =
 # always considered; gated to filing services by condition).
 COMPLETION = [
     # Initial payment comes first (the fee + terms are shown right after the details are confirmed).
-    {"id": 600, "field": "payment_reference", "type": "text",
+    {"id": 600, "field": "payment_screenshot", "type": "file",
      "condition": lambda a: a.get("service_type") in FILING_SERVICES,
-     "prompt": "Once you've sent the e-Transfer, reply with your Interac confirmation/reference "
-               "number (you'll find it in your banking app after sending), or type 'skip' if you "
-               "haven't paid yet.",
-     "ai_parse": "Return the confirmation/reference number, or 'skip'."},
+     "prompt": "Once you've sent the e-Transfer, please share a screenshot of it for confirmation - "
+               "upload it with 📎, then 'done' (or 'skip' if you haven't paid yet).",
+     "ai_parse": "File upload - handled separately."},
     # Authorization to submit to the CRA comes AFTER the initial payment.
     {"id": 601, "field": "authorization_agreed", "type": "boolean", "options": ["Yes", "No"],
      "condition": lambda a: a.get("service_type") in FILING_SERVICES,
@@ -633,8 +738,48 @@ def _tag(questions, workflow):
 
 
 # Workflow tag == the router's option label, so get_next_question matches service_type directly.
-QUESTIONS = ([CUSTOMER_Q, SERVICE_Q]
-             + _tag(PERSONAL, "Personal Tax")
+# Personal-flow sequence, matching the client's 2026 Client Information Form. The two
+# existing-customer prefill questions (SIN + "still correct?") stay at the very front; everything
+# else is ordered by this list. Reordering only - no question is added, removed, or changed.
+_PERSONAL_ORDER = [
+    # Personal information
+    "full_name", "phone", "email", "sin", "sin_document", "dob", "address",
+    "marital_status", "marital_changed", "marital_change_date",
+    # Student
+    "is_student", "tuition_t2202", "student_type", "student_completion",
+    # Newcomer + CRA access
+    "landed_2024", "landing_date", "filed_last_year", "has_mycra", "rep_auth_ack", "noa_method",
+    # Rent / property tax
+    "rent_paid_2025",
+    # Income slips + gig
+    "income_slips", "is_gig", "gig_platforms", "gig_cash", "gig_has_gst", "gig_netfile",
+    # Other deductions & credits
+    "owns_rental", "rental_address", "rental_gross_income", "rental_mortgage_interest",
+    "rental_property_tax", "rental_expenses", "rental_ownership", "rental_partners",
+    "first_home", "first_home_details", "has_medical", "medical_details",
+    "has_donations", "donations_note", "has_gym", "gym_amount", "gym_receipt", "gym_province",
+    "lived_north", "northern_zone", "has_northern_travel", "northern_t4", "northern_receipts",
+    # Children
+    "has_children", "child_born_this_year", "newborn_details", "children_details",
+    "has_childcare", "childcare_details", "childcare_receipt",
+    "has_child_fitness", "child_fitness_province", "child_fitness_amount", "child_fitness_receipt",
+    # Spouse
+    "spouse_in_canada", "spouse_name", "spouse_dob", "spouse_income", "spouse_sin",
+    "spouse_phone", "spouse_email", "spouse_address", "spouse_landing_date",
+    # Province change
+    "province_changed", "move_date", "province_from", "province_to", "move_reason",
+    "move_40km", "move_expenses", "move_receipts",
+    # Leaving Canada
+    "left_canada_date", "spouse_left_canada_date",
+    # Completion
+    "third_party_payer", "payer_details", "additional_notes", "confirmation",
+]
+_ORD = {f: i for i, f in enumerate(_PERSONAL_ORDER)}
+PERSONAL = PERSONAL[:2] + sorted(PERSONAL[2:], key=lambda q: _ORD.get(q["field"], len(_ORD)))
+
+# SERVICE_Q first so the greeting opens with the service menu (Amendment); New/Existing follows.
+QUESTIONS = ([SERVICE_Q, CUSTOMER_Q]
+             + _tag(PERSONAL, "Personal or Individual Tax")
              + _tag(CORPORATE, "Corporate Tax")
              + _tag(GST, "GST/HST")
              + _tag(REGISTRATION, "Business Registration")

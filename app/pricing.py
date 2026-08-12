@@ -18,12 +18,12 @@ PRICING = {
 
 
 def estimate(service: str, answers: dict, prices: dict = PRICING) -> str:
-    if service == "Personal Tax":
+    if service == "Personal or Individual Tax":
         if answers.get("is_gig") == "Yes":
             p = prices["personal_gig"]
-            return f"Estimated fee: Personal Tax + Gig Economy - ${p['initial']} initial ({p['range']})."
+            return f"Estimated fee: Personal or Individual Tax + Gig Economy - ${p['initial']} initial ({p['range']})."
         p = prices["personal_base"]
-        return f"Estimated fee: Personal Tax - ${p['initial']} initial (standard, up to 3 slips; {p['range']})."
+        return f"Estimated fee: Personal or Individual Tax - ${p['initial']} initial (standard, up to 3 slips; {p['range']})."
 
     if service == "GST/HST":
         if answers.get("gst_service") == "File a GST Return":
