@@ -6,14 +6,69 @@ def _q(field):
     return next(x for x in QUESTIONS if x["field"] == field)
 
 
+def test_partial_address_asks_only_missing_piece(monkeypatch):
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce.geocode, "configured", lambda: False)   # deterministic
+    seed = {"service_type": "Personal or Individual Tax", "full_name": "A B", "phone": "4160001234",
+            "email": "a@b.com", "sin": "046454286", "sin_document": "skip", "dob": "01/01/1990"}
+    st = dict(seed)                                    # missing street number -> ask just for it
+    reply, done = ce.advance(st, "Absolute Avenue Mississauga ON L4Z 0A4")
+    assert "street/house number" in reply and "address" not in st and not done
+    ce.advance(st, "70")                               # bare number gets merged in front
+    assert st["address"] == "70 Absolute Avenue Mississauga ON L4Z 0A4"
+    st = dict(seed)                                    # missing postal code -> ask just for it
+    reply, _ = ce.advance(st, "70 Absolute Avenue Mississauga ON")
+    assert "postal code" in reply
+    ce.advance(st, "L4Z 0A4")                          # postal appended at the end
+    assert st["address"].endswith("L4Z 0A4")
+    st = dict(seed)                                    # missing city -> ask just for it
+    reply, _ = ce.advance(st, "70 Absolute Avenue - 1802 ON L4Z 0A5")
+    assert "city" in reply
+    ce.advance(st, "Mississauga")                      # city inserted before province
+    assert st["address"] == "70 Absolute Avenue - 1802 Mississauga ON L4Z 0A5"
+    st = dict(seed)                                    # full address incl. unit number -> straight through
+    ce.advance(st, "70 Absolute Avenue - 1802 Mississauga ON L4Z 0A5")
+    assert st["address"] == "70 Absolute Avenue - 1802 Mississauga ON L4Z 0A5"
+
+
+def test_session_inactivity_timeout():
+    import time
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    st = {"service_type": "Personal or Individual Tax", "full_name": "A B", "_last_at": time.time()}
+    reply, _ = ce.advance(st, "4160001234")                 # active within window -> continues
+    assert "timed out" not in reply and st.get("phone") == "4160001234"
+    st["_last_at"] = time.time() - 6 * 60                   # idle > 5 min -> session resets
+    reply, done = ce.advance(st, "a@b.com")
+    assert "timed out" in reply and not done
+    assert "full_name" not in st and "phone" not in st      # state wiped, starts fresh
+    st2 = {"_escalate": True, "_last_at": time.time() - 6 * 60}   # escalated sessions never reset
+    reply2, _ = ce.advance(st2, "hello")
+    assert "timed out" not in reply2
+
+
+def test_escalation_never_sets_done_and_back_recovers():
+    # INVARIANT: escalations set _escalate only, never _done - so 'Back' recovers cleanly and no
+    # stray "Have a nice day" / reference number appears. (Regression for the Quebec-resume bugs.)
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    st = {"service_type": "Personal or Individual Tax", "full_name": "A B", "phone": "4160001234",
+          "email": "a@b.com", "sin": "046454286", "sin_document": "skip", "dob": "01/01/1990"}
+    ce.advance(st, "1000 Rue de la Gauchetiere O, Montreal QC H3B 4W5")   # Quebec -> hand off
+    assert st.get("_escalate") is True and "_done" not in st            # escalation != completion
+    ce.advance(st, "ok")                                                 # connecting to staff
+    back, _ = ce.advance(st, "go back")                                  # Back -> re-ask address
+    assert "address" in back.lower() and st.get("_escalate") is None and "_done" not in st
+    reply, done = ce.advance(st, "70 Absolute Ave, Mississauga ON L4Z 0A4")   # valid ON -> continue
+    assert not done and "nice day" not in reply.lower() and "reference" not in reply.lower()
+
+
 def test_address_requires_postal_code():
     assert not validate_answer("21 purebooke ave", _q("address"))[0]      # client bug: no postal
     assert validate_answer("21 Purebrook Ave, Toronto M5V 3L9", _q("address"))[0]
 
 
-def test_gst_reporting_period_requires_year():
-    assert not validate_answer("some period", _q("corp_gst_reporting"))[0]
-    assert validate_answer("Jan 2025 to Dec 2025", _q("corp_gst_reporting"))[0]
 
 
 def test_kb_link_removed_everywhere():
@@ -31,18 +86,16 @@ def test_etransfer_email_shown_at_completion():
 
 def test_cra_rep_auth_split_by_answer():
     from app.chat_engine import advance
-    seed = {"customer_status": "New Customer", "service_type": "Personal or Individual Tax", "full_name": "A B",
+    seed = {"service_type": "Personal or Individual Tax", "full_name": "A B",
             "phone": "4160001234", "email": "a@b.com", "sin": "046454286", "sin_document": "skip",
             "dob": "01/01/1990", "address": "1 St, Toronto ON M5V 3L9", "marital_status": "Single",
-            "marital_changed": "No", "is_student": "No", "landed_2024": "No", "filed_last_year": "Yes"}
+            "marital_changed": "No", "is_student": "No", "prior_noa": "skip", "landed_2024": "No", "filed_last_year": "Yes"}
     s = dict(seed)
     yes, _ = advance(s, "Yes")                # has_mycra = Yes -> rep-auth steps as their own step
-    assert "6. Grant us Level 2" in yes and "Reply 'Ok'" in yes
-    assert "Notice of Assessment" not in yes and "If yes" not in yes   # NO other-branch / labels
-    nxt, _ = advance(s, "Ok")                 # acknowledge -> continue (rent/property tax next)
-    assert "rent or property tax" in nxt.lower()
+    assert "Rep ID: 64HN5M7" in yes and "Access Level 2" in yes and "Reply 'Ok'" in yes
+    assert "Notice of Assessment" not in yes            # NO other-branch content
     no, _ = advance(dict(seed), "No")         # has_mycra = No -> only the NOA request
-    assert "Notice of Assessment" in no and "Grant us Level 2" not in no
+    assert "Notice of Assessment" in no and "Rep ID" not in no
     assert "tuition" not in yes.lower() and "tuition" not in no.lower()   # tuition -> student question only
 
 
@@ -180,7 +233,7 @@ def test_completion_authorization_and_payment_flow():
           "has_mycra": "Yes", "rep_auth_ack": "Ok", "marital_status": "Single", "marital_changed": "No", "filed_last_year": "Yes",
           "income_slips": "skip", "is_gig": "No", "owns_rental": "No", "first_home": "No",
           "has_medical": "No", "has_donations": "No", "has_gym": "No", "has_childcare": "No", "has_child_fitness": "No",
-          "lived_north": "No", "is_student": "No", "rent_paid_2025": "0",
+          "lived_north": "No", "is_student": "No", "prior_noa": "skip", "rent_paid_2025": "0",
           "province_changed": "No", "left_canada_date": "No", "additional_notes": "none",
           "third_party_payer": "No"}
     s = dict(st)
@@ -207,13 +260,6 @@ def test_benefits_explainer_personal_tax_only_at_end():
     assert personal.rstrip().endswith("claim all applicable ones on your tax return.")  # very end
     for svc in ({"service_type": "GST/HST"}, {"service_type": "Corporate Tax"}):
         assert "Canada Child Benefit" not in _payment_terms(svc)
-
-
-def test_gst_number_format_validation():
-    assert validate_answer("719404519RT0001", _q("corp_gst_number"))[0]     # p14: valid BN
-    assert validate_answer("719404519", _q("corp_gst_number"))[0]
-    assert validate_answer("none", _q("corp_gst_number"))[0]                # allowed for corp
-    assert not validate_answer("2345", _q("corp_gst_number"))[0]            # p15: too short
 
 
 def test_future_dates_rejected():
@@ -259,19 +305,19 @@ def test_service_menu_asked_first():
     assert get_next_question({})["field"] == "service_type"          # greeting opens with the menu
 
 
-def test_customer_status_asked_second():
-    assert get_next_question({"service_type": "Personal or Individual Tax"})["field"] == "customer_status"
+def test_no_customer_status_step():
+    # New/Existing removed - the service menu is the only opening question.
+    assert get_next_question({})["field"] == "service_type"
+    assert "customer_status" not in {q["field"] for q in QUESTIONS}
 
 
-def test_router_directs_to_corporate():
-    q = get_next_question({"customer_status": "New Customer", "service_type": "Corporate Tax"})
-    assert q["workflow"] == "Corporate Tax"
-    assert q["field"] == "corporation_name"
-
-
-def test_router_directs_to_gst():
-    answers = {"customer_status": "New Customer", "service_type": "GST/HST"}
-    assert get_next_question(answers)["field"] == "gst_service"
+def test_corporate_gst_reg_are_checklist_only():
+    from app.chat_engine import _done_message
+    # These services ask NO questions - selecting them goes straight to completion (the checklist).
+    for svc in ("Corporate Tax", "GST/HST", "Business Registration"):
+        assert get_next_question({"service_type": svc}) is None
+        msg = _done_message({"service_type": svc})
+        assert "Checklist" in msg and "Speak with Staff" in msg and "raviaccuratetax@gmail.com" in msg
 
 
 def test_flow_reaches_address_after_core():
@@ -383,7 +429,7 @@ def test_edit_field_at_review(monkeypatch):
              "has_mycra": "Yes", "rep_auth_ack": "Ok", "marital_status": "Single", "marital_changed": "No", "filed_last_year": "Yes",
              "income_slips": "skip", "is_gig": "No", "owns_rental": "No",
              "first_home": "No", "has_medical": "No", "has_donations": "No",
-             "has_gym": "No", "has_childcare": "No", "has_child_fitness": "No", "lived_north": "No", "is_student": "No",
+             "has_gym": "No", "has_childcare": "No", "has_child_fitness": "No", "lived_north": "No", "is_student": "No", "prior_noa": "skip",
              "rent_paid_2025": "0", "province_changed": "No", "left_canada_date": "No",
              "additional_notes": "none", "third_party_payer": "No"}
     assert ce.get_next_question(state)["field"] == "confirmation"
@@ -442,38 +488,22 @@ def test_new_resident_asked_mycra_and_gets_repid(monkeypatch):
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
     # New customer, resides in Canada (landed_2024=No) → gets the myCRA question
     answers = dict(CORE, address="1 St, Toronto ON M5V 3L9", marital_status="Single",
-                   marital_changed="No", is_student="No", landed_2024="No", filed_last_year="Yes")
+                   marital_changed="No", is_student="No", prior_noa="skip", landed_2024="No", filed_last_year="Yes")
     assert ce.get_next_question(answers)["field"] == "has_mycra"
     # answering Yes surfaces the Rep-ID instruction
     state = dict(answers)
     reply, _ = ce.advance(state, "Yes")
-    assert "Representative ID" in reply
+    assert "Rep ID: 64HN5M7" in reply
 
 
 def test_newcomer_gets_world_income_notice(monkeypatch):
     import app.chat_engine as ce
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
     state = dict(CORE, address="1 St, Toronto ON M5V 3L9", marital_status="Single",
-                 marital_changed="No", is_student="No")   # landed_2024 is the next question
+                 marital_changed="No", is_student="No", prior_noa="skip")   # landed_2024 is the next question
     reply, _ = ce.advance(state, "Yes")            # landed in Canada
     assert "worldwide income" in reply.lower()     # guidance stays; links removed per client
     assert "canada.ca" not in reply                # all resource links removed
-
-
-def test_incorporation_shows_etransfer_directive(monkeypatch):
-    import app.chat_engine as ce
-    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    state = {"customer_status": "New Customer", "service_type": "Business Registration"}
-    reply, _ = ce.advance(state, "New Incorporation")     # reg_type answered
-    assert "e-Transfer" in reply
-
-
-def test_gst_register_shows_procurement_sla(monkeypatch):
-    import app.chat_engine as ce
-    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    state = {"customer_status": "New Customer", "service_type": "GST/HST"}
-    reply, _ = ce.advance(state, "Register for a GST Number")   # gst_service answered
-    assert "2 to 3 weeks" in reply
 
 
 def test_sin_encryption_round_trip():

@@ -25,10 +25,9 @@ def _parts(lang: str) -> tuple[str, str]:
 
 
 def detect(text: str) -> str:
-    """Return one of VALID. Falls back to English on any doubt or failure."""
-    if not llm.configured() or not (text or "").strip():
-        return DEFAULT
-    try:
+    """English only (client decision) - the bot no longer detects or replies in other languages."""
+    return DEFAULT
+    try:                                          # ponytail: kept, unreachable - flip back if multilingual returns
         out = llm.complete(
             "Identify the language and script of the message below.\n"
             "Answer with EXACTLY one of these labels and nothing else:\n"

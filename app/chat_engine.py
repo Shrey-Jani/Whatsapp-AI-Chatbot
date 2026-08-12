@@ -7,16 +7,19 @@ materialised at confirmation (Phase 5).
 """
 import json
 import re
+import time
 from datetime import datetime
 
 from . import geocode, i18n, llm
 from .config import settings
 from .pricing import PRICING, estimate
-from .question_flow import (AUTHORIZATION_MSG, CRA_HELPLINE, ETRANSFER_DIRECTIVE,
-                            GIG_GST_NETFILE_HELP, GST_WARNING, PROCUREMENT_SLA, QUESTIONS,
-                            RENT_NO_PROOF_GUIDANCE, REP_AUTH_NO, GIG_SUMMARY_GUIDANCE,
+from .question_flow import (AUTHORIZATION_MSG, CORP_FILING_CHECKLIST, CRA_HELPLINE,
+                            ETRANSFER_DIRECTIVE, GIG_GST_NETFILE_HELP, GST_REG_CHECKLIST, GST_WARNING,
+                            INCORPORATION_CHECKLIST, PROCUREMENT_SLA, QUESTIONS,
+                            RENT_NO_PROOF_GUIDANCE, REP_AUTH_NO, REP_AUTH_YES, GIG_SUMMARY_GUIDANCE,
                             RIDESHARE_PLATFORMS, WORLD_INCOME, in_quebec)
 
+SESSION_TIMEOUT = 5 * 60   # seconds of inactivity before an unfinished session restarts
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
 # "Take me back to the previous question" - phrases that undo the last answer.
@@ -58,7 +61,7 @@ REVIEW_LABELS = {
 }
 # Housekeeping fields that aren't client-facing "details" - kept out of the review.
 _REVIEW_SKIP = {"customer_status", "confirmation", "payment_reference", "authorization_agreed",
-                "rep_auth_ack", "details_ok", "profile_prefilled"}
+                "rep_auth_ack", "netfile_help_ack", "details_ok", "profile_prefilled"}
 DONE_MSG = ("Thank you we have everything we need. Our team will review your details and "
             "send your Information Sheet and price estimate shortly.\n\n"
             "Payment is by Interac e-Transfer once you approve the estimate; work begins after "
@@ -140,7 +143,9 @@ QUEBEC_NOTICE = (
     "However, if you're filing an earlier year when you lived in another province, our team can "
     "still help - I'll connect you with them and someone will follow up shortly.")
 
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Strict-ish email: letters/digits/._%+- local part, real domain labels, 2+ letter TLD.
+# (The old "anything but @/space" regex accepted junk like a trailing apostrophe.)
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$")
 
 
 def _answers(state: dict) -> dict:
@@ -341,6 +346,54 @@ def age_from_dob(dob_str: str | None) -> int | None:
     return today.year - y - ((today.month, today.day) < (mo, d))
 
 
+_PROVINCES = frozenset("ON BC AB SK MB QC NB NS PE NL YT NT NU".split())
+_STREET_TYPES = frozenset(
+    "avenue ave street st road rd drive dr boulevard blvd crescent cres court ct lane ln "
+    "way circle cir trail terrace place pl gate row square sq parkway pkwy line highway hwy".split())
+
+
+def _addr_missing(addr: str) -> list[str]:
+    """Which required components are missing: street/house number, city, postal code.
+
+    Deterministic checks (unit numbers like '- 1802' don't confuse them); the geocoder covers
+    deeper problems. Per the client: ask ONLY for the missing information, never the whole address.
+    """
+    from .question_flow import _POSTAL_RE
+    missing = []
+    no_postal = _POSTAL_RE.sub("", addr or "")
+    if not re.search(r"\d", no_postal):                       # digits besides the postal code
+        missing.append("street/house number")
+    # City: an alphabetic word after the street-type word (Avenue/St/...), before province/postal.
+    tokens = [t.strip(",.-#") for t in no_postal.split()]
+    low = [t.lower() for t in tokens]
+    if any(t in _STREET_TYPES for t in low):                  # can only judge city if we see a street type
+        last_st = max(i for i, t in enumerate(low) if t in _STREET_TYPES)
+        after = [t for t in tokens[last_st + 1:] if t and t.upper() not in _PROVINCES]
+        if not any(t.isalpha() for t in after):
+            missing.append("city")
+    if not _POSTAL_RE.search(addr or ""):
+        missing.append("postal code (e.g. M5V 3L9)")
+    return missing
+
+
+def _merge_addr(pending: str, piece: str) -> str:
+    """Combine the stored partial address with the just-supplied missing piece(s)."""
+    from .question_flow import _POSTAL_RE
+    p = piece.strip().strip(",")
+    # A house/unit number in any common shape goes in front: '70', '1802 - 70', '70-1802', 'unit 1802 70'.
+    if re.fullmatch(r"(?:(?:unit|apt|suite|#)\s*)?[\d][\d\s\-#/]*[A-Za-z]?", p, re.IGNORECASE):
+        return f"{p} {pending}"
+    if _POSTAL_RE.search(p) and len(p) <= 8:                  # a bare postal code goes at the end
+        return f"{pending} {p}"
+    if p.replace(" ", "").isalpha() and len(p.split()) <= 3:  # a city goes before province/postal
+        toks = pending.split()
+        for i, t in enumerate(toks):
+            if t.strip(",").upper() in _PROVINCES or _POSTAL_RE.match(" ".join(toks[i:i + 2])):
+                return " ".join(toks[:i] + [p] + toks[i:])
+        return f"{pending} {p}"
+    return p                                                  # anything else = a fresh full address
+
+
 def _names_quebec(text: str) -> bool:
     """True if a free-text province answer names Quebec (any spelling / abbreviation)."""
     t = (text or "").strip().lower()
@@ -423,12 +476,41 @@ def _payment_terms(answers: dict, lang: str = i18n.DEFAULT) -> str:
     return msg
 
 
+# Shown upfront when the client picks Personal Tax (option 1): the four checklists + email fallback.
+PERSONAL_TAX_CHECKLIST = (
+    "Personal Tax - Checklist (what to have ready):\n"
+    "- Income slips: T4, T4A, T5, RRSP, FHSA, T2202 (tuition), and any other slips\n"
+    "- SIN, date of birth, and complete address\n"
+    "- Marital status (and your spouse's details if married/common-law)\n"
+    "- Rent or property tax paid, and receipts for any deductions (medical, donations, child care, moving)")
+PRICING_INFO = (
+    "Pricing:\n"
+    "- Initial payment: $45 (regular employment income) or $70 (Uber/Skip/DoorDash/Lyft or self-employment)\n"
+    "- Personal tax return (up to 3 T4 slips): $65\n"
+    "- Self-employment / delivery income: $75 and above\n"
+    "- GST return filing: $50\n"
+    "Your initial payment is adjusted toward your total fee; we only request the remaining balance (if any).")
+EMAIL_FALLBACK = (
+    "If you'd prefer not to go through the chatbot, take a screenshot of this checklist and email "
+    "your information to {email}, and our team will get back to you shortly.")
+# Corporate / GST / Business Registration are NOT question-driven - just show the checklist + hand-off.
+_SERVICE_CHECKLISTS = {"Corporate Tax": CORP_FILING_CHECKLIST, "GST/HST": GST_REG_CHECKLIST,
+                       "Business Registration": INCORPORATION_CHECKLIST}
+CHECKLIST_HANDOFF = ("Please review this checklist. If you have any questions, press 'Speak with "
+                     "Staff' - or just share your information and e-Transfer screenshot by email to "
+                     "{email}, and we'll get back to you shortly.")
+
+
 def _done_message(answers: dict, lang: str = i18n.DEFAULT) -> str:
     """Final acknowledgement. The fee/terms were already shown at the authorization step."""
     service = answers.get("service_type")
     if service == "Others":                           # not a filing - just an enquiry hand-off
         return i18n.localize("Thank you - our team will review your enquiry and contact you "
                              "shortly.", lang)
+    checklist = _SERVICE_CHECKLISTS.get(service)      # Corporate / GST / Business Reg: checklist only
+    if checklist:
+        return (i18n.localize(checklist.format(email=settings.etransfer_email), lang) + "\n\n"
+                + i18n.localize(CHECKLIST_HANDOFF.format(email=settings.etransfer_email), lang))
     paid = (answers.get("payment_screenshot") or "").strip().lower() not in ("", "skip")
     note = (" We've received your payment confirmation and will verify it shortly." if paid
             else " Once you've sent your e-Transfer, share a screenshot here for confirmation.")
@@ -459,6 +541,19 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     `greeting` is the user's very first message - used once to detect their language so the
     bot can acknowledge them and continue in the same language + script.
     """
+    # Lazy 5-minute inactivity timeout: every message stamps _last_at; if the NEXT message
+    # arrives after the window, the unfinished session resets and starts fresh. No timers needed.
+    now = time.time()
+    last = state.get("_last_at")
+    state["_last_at"] = now
+    if (user_text is not None and last and now - last > SESSION_TIMEOUT
+            and not state.get("_done") and not state.get("_escalate")):
+        state.clear()
+        state["_last_at"] = now
+        first = get_next_question({})
+        return ("Your session timed out due to inactivity, so let's start fresh.\n\n"
+                + _render(first), False)
+
     answers = _answers(state)
     q = get_next_question(answers)
 
@@ -477,8 +572,8 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
 
     if state.get("_escalate"):                # already handed off to staff
         if any(p in low for p in GO_BACK_PHRASES) and q is not None:   # clicked staff by mistake -> resume
-            for k in ("_escalate", "_escalate_reason", "_escalate_logged"):
-                state.pop(k, None)
+            for k in ("_escalate", "_escalate_reason", "_escalate_logged", "_done"):
+                state.pop(k, None)            # clear _done too - the flow is no longer finished
             resume = i18n.localize("No problem - let's continue where we left off.", lang)
             return f"{resume}\n\n{_render(q, lang, answers)}", False
         return i18n.localize(ESCALATE_MSG, lang), True
@@ -492,6 +587,7 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         if history:
             state.pop(history.pop(), None)       # remove the last answer → it becomes current again
             state["_history"] = history
+            state.pop("_done", None)             # undoing means the flow is no longer complete
             prev = get_next_question(_answers(state))
             back = i18n.localize("No problem - let's redo that.", lang)
             return (f"{back}\n\n{_render(prev, lang, _answers(state))}", False) if prev \
@@ -516,6 +612,18 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     value = parsed["value"]
     if q["type"] == "date":                   # accept any year / separators, store DD/MM/YYYY
         value = _normalize_date(value) or value
+    if q["type"] == "email":                  # strip copy-paste junk: quotes, trailing punctuation
+        value = value.strip().strip("'\"<>()[]{},;:").lower()
+    if q.get("check") == "postal":            # partial address: merge the missing piece, ask only for it
+        pending = state.pop("_addr_pending", None)
+        if pending:
+            value = _merge_addr(pending, value)
+            state["_addr_merged"] = True      # confirm the assembled address before moving on
+        miss = _addr_missing(value)
+        if miss:
+            state["_addr_pending"] = value
+            return i18n.localize(f"Almost there - your address seems to be missing the "
+                                 f"{' and '.join(miss)}. Please send just that.", lang), False
     ok, err = validate_answer(value, q)
     if ok and q.get("check") == "postal" and geocode.configured():   # optional address verification
         if value == state.get("_addr_last"):   # user re-sent the same address → accept as typed
@@ -538,23 +646,31 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
                 "staff, who will follow up with you shortly.", lang), True
         return f"{i18n.localize(err, lang)}\n\n{_render(q, lang, answers)}", False
 
+    # Quebec detected - from the address postal code or a "moved to Quebec" answer. We don't file
+    # Quebec provincial returns, but a prior non-Quebec year may still be fileable, so hand off to
+    # staff. Checked BEFORE storing, so pressing 'Back' re-asks the address (not the next question).
+    if (q["field"] == "address" and in_quebec({"address": value})) or \
+       (q["field"] == "province_to" and _names_quebec(value)):
+        # INVARIANT: an escalation sets _escalate ONLY, never _done. _done means the intake genuinely
+        # completed (all questions answered) - see the single assignment at the end of advance().
+        # Conflating the two caused stale-_done "goodbye" bugs on resume; keep them separate.
+        state["_escalate"] = True
+        state["_escalate_reason"] = "Quebec residence - confirm which filing year"
+        return i18n.localize(QUEBEC_NOTICE, lang), True
+
     state.pop(f"_err_{q['field']}", None)      # clear the error counter on success
     state[q["field"]] = value
     answers[q["field"]] = value
     state.setdefault("_history", []).append(q["field"])   # so "go back" can undo this answer
 
-    # Quebec detected - from the address postal code or a "moved to Quebec" answer. We don't file
-    # Quebec provincial returns, but a prior non-Quebec year may still be fileable, so hand off to
-    # staff (don't turn the client away cold).
-    if (q["field"] == "address" and in_quebec(answers)) or \
-       (q["field"] == "province_to" and _names_quebec(value)):
-        state["_escalate"] = True
-        state["_escalate_reason"] = "Quebec residence - confirm which filing year"
-        state["_done"] = True
-        return i18n.localize(QUEBEC_NOTICE, lang), True
-
     notices = []                               # contextual guidance shown before the next question
     f = q["field"]
+    if state.pop("_addr_merged", None):        # assembled from pieces - confirm the full address
+        notices.append(i18n.localize(f"Perfect - your full address is: {value}", lang))
+    if f == "service_type" and value == "Personal or Individual Tax":        # four checklists upfront
+        for msg in (PERSONAL_TAX_CHECKLIST, POLICIES_MSG, PRICING_INFO,
+                    REP_AUTH_YES, EMAIL_FALLBACK.format(email=settings.etransfer_email)):
+            notices.append(i18n.localize(msg, lang))
     if f == "is_gig" and value == "Yes":                                     # which platform reports to send
         notices.append(i18n.localize(GIG_SUMMARY_GUIDANCE, lang))
     if f in ("gig_platforms", "gst_platforms") and _multi_platform(value):   # §4 mandatory GST
@@ -565,23 +681,27 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
             + f"\n\n{GST_WARNING}")            # warning itself stays verbatim
     if f == "rent_paid_2025" and _to_amount(value) > 0:                      # rent/property tax proof note
         notices.append(i18n.localize(RENT_NO_PROOF_GUIDANCE, lang))
-    if f == "gig_has_gst" and value == "Yes":                                # how to get NetFile code
-        notices.append(i18n.localize(GIG_GST_NETFILE_HELP, lang))
+    # gig_has_gst == "No" -> the netfile_help_ack step shows the how-to-get info (Ok to continue).
     if f == "confirmation":                                                  # fee + terms → then pay
         notices.append(_payment_terms(answers, lang))
     if f == "authorization_agreed" and value == "No":                        # declined to authorize
         notices.append(i18n.localize(
             "No problem - we won't submit your return until you're ready to authorize it. "
             "Our team will follow up with you.", lang))
-    if f == "gst_service" and value == "Register for a GST Number":          # §4 procurement SLA
+    if f == "service_type" and value == "Corporate Tax":                     # upfront checklist
+        notices.append(i18n.localize(CORP_FILING_CHECKLIST.format(email=settings.etransfer_email), lang))
+    if f == "gst_service" and value == "Register for a GST Number":          # upfront checklist + §4 SLA
+        notices.append(i18n.localize(GST_REG_CHECKLIST.format(email=settings.etransfer_email), lang))
         notices.append(i18n.localize(PROCUREMENT_SLA, lang))
     if f == "corp_gst_number" and value.strip().lower() == "none":           # §5 CRA helpline
         notices.append(CRA_HELPLINE)           # mandated verbatim (+ phone)
-    if f == "reg_type" and value == "New Incorporation":                     # §6 e-Transfer first
+    if f == "reg_type" and value == "New Incorporation":                     # upfront checklist + §6 e-Transfer
+        notices.append(i18n.localize(INCORPORATION_CHECKLIST.format(email=settings.etransfer_email), lang))
         notices.append(ETRANSFER_DIRECTIVE)    # mandated verbatim
     # has_mycra == Yes is handled by the rep_auth_ack question (steps + "Ok" to continue).
     if f == "has_mycra" and value == "No":                                   # §2A no account -> send NOA
         notices.append(i18n.localize(REP_AUTH_NO.format(year=settings.tax_year), lang))
+    # is_student == "No" -> the prior_noa question handles the previous-student NOA (upload or skip).
     if f == "landed_2024" and value == "Yes":                                # §2B world income
         notices.append(i18n.localize(WORLD_INCOME, lang))
 

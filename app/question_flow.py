@@ -59,11 +59,49 @@ def EQ(field, value):
     return lambda a: a.get(field) == value
 
 
+# Upfront checklists - shown as soon as the client picks the matching service, so they know what
+# to have ready before entering details. {email} is filled in with the payee at render time.
+GST_REG_CHECKLIST = (
+    "Checklist for Uber/Lyft GST Program Account Registration\n\n"
+    "Please have the following ready:\n"
+    "- Full Name\n"
+    "- Date of Birth\n"
+    "- Complete Residential Address\n"
+    "- SIN (Social Insurance Number)\n"
+    "- Email Address\n"
+    "- Contact Number\n\n"
+    "Registration Fee: $85, payable by e-Transfer to {email}.\n"
+    "Once we receive your information and payment, we'll proceed with your Uber/Lyft GST program "
+    "account registration.")
+INCORPORATION_CHECKLIST = (
+    "Company Incorporation Checklist\n\n"
+    "Please have the following ready:\n"
+    "- Full Name\n"
+    "- Complete Address\n"
+    "- SIN Number\n"
+    "- Date of Birth\n"
+    "- Contact Number\n"
+    "- Email ID\n"
+    "- Business Activity / Nature of Business\n\n"
+    "Fees: Company Incorporation $100 + GST/HST Registration $50 + Government Fees $200 "
+    "(+ Named Company charges, which vary) = $350 total, by e-Transfer to {email}.")
+CORP_FILING_CHECKLIST = (
+    "Corporation Tax Filing Checklist\n\n"
+    "Please have the following ready:\n"
+    "- T4A Slip\n"
+    "- December bank statement (to verify the closing balance)\n"
+    "- Director's Full Name\n"
+    "- SIN Number\n"
+    "- Date of Birth\n"
+    "- Email ID\n"
+    "- Contact Number\n"
+    "- Net File Access Code (to file the GST return) - ask us how to get it if you need help\n\n"
+    "e-Transfer initial payment: $275 to {email}.")
 MARRIED = lambda a: a.get("marital_status") in ("Married", "Common-Law")           # noqa: E731
 SPOUSE_HERE = lambda a: MARRIED(a) and a.get("spouse_in_canada") == "Yes"          # noqa: E731
 NOT_SINGLE = lambda a: a.get("marital_status") != "Single"                         # noqa: E731
 SPOUSE_LEFT = lambda a: MARRIED(a) and _left_canada(a)                             # noqa: E731
-FILED_Q = lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") != "Yes"  # noqa: E731
+FILED_Q = lambda a: a.get("landed_2024") != "Yes"                                  # noqa: E731
 
 # Mandated verbatim legal text (spec §4) - shown before GST filing and on the mandatory-GST flag.
 GST_WARNING = ("Warning: Failure to file your required GST returns will prompt the CRA to "
@@ -112,9 +150,9 @@ MOVING_CHECKLIST = ("Since you changed provinces, you may be able to claim movin
 
 # How to get a GST/HST NetFile Access Code - shown to gig drivers who have a GST account.
 GIG_GST_NETFILE_HELP = (
-    "How to get your GST/HST NetFile Access Code:\n"
-    "- Send us your previous GST/HST Return (the access code is on it).\n"
-    "- If you can't find it, call the CRA Business Enquiries line at 1-800-959-5525, press 4 for GST.")
+    "How to get Netfile Access Code:\n"
+    "Send your previous GST/HST return,\n"
+    "If you Cannot find it, call the CRA Business Enquiries line at 1-800-959-5525.")
 
 # Tax Return Review & Authorization - shown at completion, before payment. Legal text (verbatim).
 AUTHORIZATION_MSG = (
@@ -132,13 +170,13 @@ AUTHORIZATION_MSG = (
 # §2 CRA Access Authorization guidance. {year} = filing year, {next_year} = year credits carry to.
 # Shown only when the client HAS a CRA My Account (has_mycra == Yes).
 REP_AUTH_YES = (
-    "Please add our Level 2 Authorized Representative by following these steps:\n\n"
-    "1. Log in to your CRA My Account.\n"
-    "2. Go to Profile.\n"
-    "3. Select Authorized Representative.\n"
-    "4. Choose Add a Representative.\n"
-    "5. Enter our Representative ID: 64HN5M7.\n"
-    "6. Grant us Level 2 authorization and submit.\n\n"
+    "Please add our Rep ID by following these steps:\n\n"
+    "- Open your CRA account\n"
+    "- Go to Profile\n"
+    "- Find 'Add Authorized Representative'\n"
+    "- Add our Rep ID: 64HN5M7\n"
+    "- Select Access Level 2\n"
+    "- Select an expiry date, or choose No Expiry\n\n"
     "This will allow us to:\n"
     "- Review tax slips submitted by your employer, bank, college, or other institutions.\n"
     "- Help ensure all available information is included in your tax return, reducing the chances "
@@ -223,7 +261,7 @@ _PERSONAL_RAW = [
 
     # §2 CRA Access Authorization - new-to-firm clients residing in Canada (not brand-new arrivals).
     {"id": 23.3, "field": "has_mycra", "type": "boolean", "options": ["Yes", "No"],
-     "condition": lambda a: a.get("customer_status") == "New Customer" and a.get("landed_2024") == "No",
+     "condition": lambda a: a.get("landed_2024") == "No",
      "prompt": "Do you have an active myCRA (CRA My Account) online account?",
      "ai_parse": "Return Yes or No."},
 
@@ -329,8 +367,12 @@ _PERSONAL_RAW = [
      "condition": YES("is_gig"),
      "prompt": "Do you have a GST/HST account registered with CRA?", "ai_parse": "Return Yes or No."},
     {"id": 32.6, "field": "gig_netfile", "type": "text", "condition": YES("gig_has_gst"),
-     "prompt": "Please share your GST/HST NetFile Access Code (if available), or reply 'skip'.",
+     "prompt": "Please share your GST/HST Netfile Access code (If available).",
      "ai_parse": "Extract the NetFile access code, or 'skip'."},
+    # No account -> show how to get the access code; user confirms with 'Ok' before continuing.
+    {"id": 32.7, "field": "netfile_help_ack", "type": "text", "condition": EQ("gig_has_gst", "No"),
+     "prompt": GIG_GST_NETFILE_HELP + "\n\nReply 'Ok' to continue.",
+     "ai_parse": "Return 'Ok'."},
 
     {"id": 33, "field": "owns_rental", "type": "boolean", "options": ["Yes", "No"],
      "prompt": "Do you own any real estate that generates RENTAL income?", "ai_parse": "Return Yes or No."},
@@ -452,6 +494,12 @@ _PERSONAL_RAW = [
     {"id": 45.63, "field": "student_completion", "type": "text", "condition": YES("is_student"),
      "prompt": "Your program completion date, or expected completion date (DD/MM/YYYY)?",
      "ai_parse": "Extract the completion date."},
+    # Not a student this year - but a previous student may have tuition credits carried forward.
+    {"id": 45.64, "field": "prior_noa", "type": "file", "condition": EQ("is_student", "No"),
+     "prompt": "If you were a student previously, please share your {prev_year} Notice of Assessment "
+               "(NOA) or {prev_year} Tax Summary with 📎, then 'done' - so we can use any tuition "
+               "credits carried forward. Type 'skip' if you were never a student.",
+     "ai_parse": "File upload - handled separately."},
 
     {"id": 47, "field": "rent_paid_2025", "type": "number", "min": 0,
      "prompt": "Total rent or property tax you paid in {year} (enter 0 if none)?",
@@ -713,7 +761,7 @@ OTHERS = [
 ]
 
 # Services that end with authorization + payment (everything except an "Others" enquiry).
-FILING_SERVICES = ("Personal or Individual Tax", "Corporate Tax", "GST/HST", "Business Registration")
+FILING_SERVICES = ("Personal or Individual Tax",)   # only Personal is question-driven (payment/auth steps)
 
 # Shared completion steps - asked after each filing workflow's own confirmation (untagged =
 # always considered; gated to filing services by condition).
@@ -747,13 +795,14 @@ _PERSONAL_ORDER = [
     "full_name", "phone", "email", "sin", "sin_document", "dob", "address",
     "marital_status", "marital_changed", "marital_change_date",
     # Student
-    "is_student", "tuition_t2202", "student_type", "student_completion",
+    "is_student", "tuition_t2202", "student_type", "student_completion", "prior_noa",
     # Newcomer + CRA access
     "landed_2024", "landing_date", "filed_last_year", "has_mycra", "rep_auth_ack", "noa_method",
     # Rent / property tax
     "rent_paid_2025",
     # Income slips + gig
     "income_slips", "is_gig", "gig_platforms", "gig_cash", "gig_has_gst", "gig_netfile",
+    "netfile_help_ack",
     # Other deductions & credits
     "owns_rental", "rental_address", "rental_gross_income", "rental_mortgage_interest",
     "rental_property_tax", "rental_expenses", "rental_ownership", "rental_partners",
@@ -779,10 +828,9 @@ _ORD = {f: i for i, f in enumerate(_PERSONAL_ORDER)}
 PERSONAL = PERSONAL[:2] + sorted(PERSONAL[2:], key=lambda q: _ORD.get(q["field"], len(_ORD)))
 
 # SERVICE_Q first so the greeting opens with the service menu (Amendment); New/Existing follows.
-QUESTIONS = ([SERVICE_Q, CUSTOMER_Q]
+# Client simplification: only Personal Tax asks questions. Corporate / GST / Business Registration
+# just show their checklist + a hand-off message (see chat_engine._done_message). No New/Existing step.
+QUESTIONS = ([SERVICE_Q]
              + _tag(PERSONAL, "Personal or Individual Tax")
-             + _tag(CORPORATE, "Corporate Tax")
-             + _tag(GST, "GST/HST")
-             + _tag(REGISTRATION, "Business Registration")
              + _tag(OTHERS, "Others")
-             + COMPLETION)                # untagged: asked after any filing workflow completes
+             + COMPLETION)                # untagged: asked after the Personal workflow completes

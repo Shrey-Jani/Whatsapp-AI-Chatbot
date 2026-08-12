@@ -65,13 +65,16 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         sess.conversation_state_json = state
 
     if done and state.get("_done"):                              # first true completion
-        if state.get("service_type") == "Others":                # an enquiry, not a tax filing
+        if state.get("_escalate"):                               # handed off to staff (e.g. Quebec) - not a filing
+            pass                                                 # escalation already logged above
+        elif state.get("service_type") == "Others":              # an enquiry, not a tax filing
             if not state.get("_enquiry_logged"):                 # capture it for staff, keep it light
                 db.add(Escalation(tenant_id=tenant.id, session_id=sess.id, reason="general enquiry",
                                   context_json={"enquiry": state.get("others_enquiry")}))
                 state["_enquiry_logged"] = True
                 sess.conversation_state_json = state
-        elif sess.client_id is None:
+        # Only Personal Tax is a real question-driven filing; Corporate/GST/Business Reg are checklist-only.
+        elif state.get("service_type") == "Personal or Individual Tax" and sess.client_id is None:
             _c, sub = await submission.materialize(db, tenant, sess)
             # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
             reply += (f"\n\nYour tax summary has been prepared for our team.\n"

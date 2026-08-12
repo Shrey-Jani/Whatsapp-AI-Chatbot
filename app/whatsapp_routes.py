@@ -125,12 +125,16 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
             except Exception as e:
                 print(f"[whatsapp] escalation notify failed: {e}")
 
-    if done and state.get("_done") and state.get("service_type") == "Others":   # enquiry, not a filing
+    if done and state.get("_done") and state.get("_escalate"):   # handed off to staff (e.g. Quebec) - not a filing
+        pass                                                     # escalation already logged above
+    elif done and state.get("_done") and state.get("service_type") == "Others":   # enquiry, not a filing
         if not state.get("_enquiry_logged"):                     # capture for staff, no tax client
             db.add(Escalation(tenant_id=tenant.id, session_id=sess.id, reason="general enquiry",
                               context_json={"enquiry": state.get("others_enquiry")}))
             state["_enquiry_logged"] = True
-    elif done and state.get("_done") and sess.client_id is None:   # first true completion (a filing)
+    # Only Personal Tax is a real filing; Corporate/GST/Business Reg are checklist-only.
+    elif (done and state.get("_done") and sess.client_id is None
+          and state.get("service_type") == "Personal or Individual Tax"):
         sess.conversation_state_json = state
         client, _sub = await submission.materialize(db, tenant, sess)
         op = _operator(tenant)
