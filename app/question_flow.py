@@ -774,7 +774,7 @@ OTHERS = [
 ]
 
 # Services that end with authorization + payment (everything except an "Others" enquiry).
-FILING_SERVICES = ("Personal or Individual Tax",)   # only Personal is question-driven (payment/auth steps)
+FILING_SERVICES = ("Personal or Individual Tax", "GST/HST")   # question-driven filing services (payment/auth steps)
 
 # Shared completion steps - asked after each filing workflow's own confirmation (untagged =
 # always considered; gated to filing services by condition).
@@ -841,9 +841,10 @@ _ORD = {f: i for i, f in enumerate(_PERSONAL_ORDER)}
 PERSONAL = PERSONAL[:2] + sorted(PERSONAL[2:], key=lambda q: _ORD.get(q["field"], len(_ORD)))
 
 # SERVICE_Q first so the greeting opens with the service menu (Amendment); New/Existing follows.
-# Client simplification: only Personal Tax asks questions. Corporate / GST / Business Registration
+# Personal Tax and GST/HST are question-driven. Corporate / Business Registration
 # just show their checklist + a hand-off message (see chat_engine._done_message). No New/Existing step.
 QUESTIONS = ([SERVICE_Q]
              + _tag(PERSONAL, "Personal or Individual Tax")
+             + _tag(GST, "GST/HST")
              + _tag(OTHERS, "Others")
-             + COMPLETION)                # untagged: asked after the Personal workflow completes
+             + COMPLETION)                # untagged: asked after filing workflows complete

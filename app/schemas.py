@@ -9,6 +9,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     done: bool = False
+    images: list[str] = []        # checklist card URLs shown alongside the reply
 
 
 class SubmissionOut(BaseModel):

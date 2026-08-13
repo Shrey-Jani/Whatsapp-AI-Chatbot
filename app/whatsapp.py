@@ -49,6 +49,19 @@ async def upload_media(tenant: Tenant, data: bytes, mime: str, filename: str) ->
         return r.json()["id"]
 
 
+async def send_image(tenant: Tenant, to: str, media_id: str, caption: str | None = None) -> None:
+    """Send an uploaded image (e.g. a checklist card) into the chat."""
+    url = f"https://graph.facebook.com/{settings.graph_api_version}/{tenant.phone_number_id}/messages"
+    img = {"id": media_id}
+    if caption:
+        img["caption"] = caption
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "image", "image": img}
+    headers = {"Authorization": f"Bearer {tenant.access_token}"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+
+
 async def send_document(tenant: Tenant, to: str, media_id: str, filename: str,
                         caption: str | None = None) -> None:
     url = f"https://graph.facebook.com/{settings.graph_api_version}/{tenant.phone_number_id}/messages"

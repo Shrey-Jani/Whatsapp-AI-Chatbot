@@ -63,3 +63,11 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f7; color
 .faq details p { margin: 10px 0 0; line-height: 1.5; color: #444; }
 .site-footer { background: #073d38; color: #fff; text-align: center; padding: 32px 20px; line-height: 1.8; }
 .site-footer .tagline { letter-spacing: 2px; font-size: 13px; opacity: .8; margin-top: 8px; }
+
+/* Checklist cards sent by the bot */
+.checklist-img {
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid #dfe4e8;
+  display: block;
+}

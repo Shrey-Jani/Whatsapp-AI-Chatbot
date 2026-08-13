@@ -10,7 +10,7 @@ import re
 import time
 from datetime import datetime
 
-from . import geocode, i18n, llm
+from . import checklists, geocode, i18n, llm
 from .config import settings
 from .pricing import PRICING, estimate
 from .question_flow import (AUTHORIZATION_MSG, CORP_FILING_CHECKLIST, CRA_HELPLINE,
@@ -58,10 +58,13 @@ REVIEW_LABELS = {
     "province_changed": "Changed province", "province_from": "Moved from", "province_to": "Moved to",
     "move_date": "Move date", "move_reason": "Move reason", "left_canada_date": "Left Canada",
     "last_refund": "Last refund", "third_party_payer": "Third-party payer", "additional_notes": "Notes",
+    "gst_platforms": "Rideshare/delivery platforms", "gst_number": "GST number",
+    "gst_reporting_period": "GST reporting period", "gst_access_code": "CRA access code",
 }
 # Housekeeping fields that aren't client-facing "details" - kept out of the review.
 _REVIEW_SKIP = {"customer_status", "confirmation", "payment_reference", "authorization_agreed",
-                "rep_auth_ack", "netfile_help_ack", "details_ok", "profile_prefilled"}
+                "rep_auth_ack", "netfile_help_ack", "details_ok", "profile_prefilled",
+                "gst_service"}
 DONE_MSG = ("Thank you we have everything we need. Our team will review your details and "
             "send your Information Sheet and price estimate shortly.\n\n"
             "Payment is by Interac e-Transfer once you approve the estimate; work begins after "
@@ -480,11 +483,44 @@ def _payment_terms(answers: dict, lang: str = i18n.DEFAULT) -> str:
 
 # Shown upfront when the client picks Personal Tax (option 1): the four checklists + email fallback.
 PERSONAL_TAX_CHECKLIST = (
-    "Personal Tax - Checklist (what to have ready):\n"
-    "- Income slips: T4, T4A, T5, RRSP, FHSA, T2202 (tuition), and any other slips\n"
-    "- SIN, date of birth, and complete address\n"
-    "- Marital status (and your spouse's details if married/common-law)\n"
-    "- Rent or property tax paid, and receipts for any deductions (medical, donations, child care, moving)")
+    "{year} TAX FILING - CLIENT INFORMATION CHECKLIST\n"
+    "Please have the following ready, along with all applicable tax slips/documents.\n\n"
+    "PERSONAL INFORMATION\n"
+    "- Full Name\n"
+    "- Phone Number\n"
+    "- Email\n"
+    "- SIN\n"
+    "- Date of Birth (DD/MM/YYYY)\n"
+    "- Complete Address\n"
+    "- Marital Status: Single / Married / Common-law / Separated / Divorced / Widowed\n"
+    "- Did your marital status change in {year}? If Yes, the date of change\n\n"
+    "STUDENT INFORMATION\n"
+    "- Were you a student during {year}? If Yes, attach your T2202 tuition slip\n"
+    "- Did you complete your studies in {year}? If Yes, the completion date\n\n"
+    "NEWCOMER INFORMATION\n"
+    "- Landing date in Canada\n"
+    "- Did you land in Canada in {prev_year}? If Yes, was your {prev_year} tax return filed?\n\n"
+    "RENT INFORMATION\n"
+    "- Total rent or property tax paid in {year}\n"
+    "- Proof of rent available?\n\n"
+    "INCOME / TAX SLIPS (attach all that apply)\n"
+    "- T4, T4A, T5, RRSP, FHSA, T2202 / Tuition\n"
+    "- Uber, Lyft, Skip, DoorDash, or other ride-share / delivery summaries\n"
+    "- Any other income or tax slips\n\n"
+    "CHILDREN INFORMATION\n"
+    "- Was a child born in {year}? If Yes, the child's full name and date of birth\n\n"
+    "SPOUSE / COMMON-LAW PARTNER\n"
+    "- Full Name, Phone Number, Email, SIN, Date of Birth, Address\n"
+    "- {year} income and landing date in Canada\n"
+    "- If your spouse/partner is NOT in Canada, still provide their full name, date of birth "
+    "and {year} income\n\n"
+    "PROVINCE CHANGE\n"
+    "- Did you move from one province to another in {year}? If Yes, the date of move and new province\n\n"
+    "LEAVING CANADA\n"
+    "- Did you or your spouse leave Canada during {year}? If Yes, the name and date left\n\n"
+    "IMPORTANT\n"
+    "Please send complete and accurate information along with all available tax slips/documents. "
+    "This helps us prepare your tax return accurately and avoid unnecessary delays or amendments.")
 PRICING_INFO = (
     "Pricing:\n"
     "- Initial payment: $45 (regular employment income) or $70 (Uber/Skip/DoorDash/Lyft or self-employment)\n"
@@ -495,8 +531,8 @@ PRICING_INFO = (
 EMAIL_FALLBACK = (
     "If you'd prefer not to go through the chatbot, take a screenshot of this checklist and email "
     "your information to {email}, and our team will get back to you shortly.")
-# Corporate / GST / Business Registration are NOT question-driven - just show the checklist + hand-off.
-_SERVICE_CHECKLISTS = {"Corporate Tax": CORP_FILING_CHECKLIST, "GST/HST": GST_REG_CHECKLIST,
+# Corporate / Business Registration are NOT question-driven - just show the checklist + hand-off.
+_SERVICE_CHECKLISTS = {"Corporate Tax": CORP_FILING_CHECKLIST,
                        "Business Registration": INCORPORATION_CHECKLIST}
 CHECKLIST_HANDOFF = ("Please review this checklist. If you have any questions, press 'Speak with "
                      "Staff' - or just share your information and e-Transfer screenshot by email to "
@@ -511,8 +547,11 @@ def _done_message(answers: dict, lang: str = i18n.DEFAULT) -> str:
                              "shortly.", lang)
     checklist = _SERVICE_CHECKLISTS.get(service)      # Corporate / GST / Business Reg: checklist only
     if checklist:
+        handoff = i18n.localize(CHECKLIST_HANDOFF.format(email=settings.etransfer_email), lang)
+        if checklists.names_for(service):             # the card is sent as an image - text is redundant
+            return handoff
         return (i18n.localize(checklist.format(email=settings.etransfer_email), lang) + "\n\n"
-                + i18n.localize(CHECKLIST_HANDOFF.format(email=settings.etransfer_email), lang))
+                + handoff)
     paid = (answers.get("payment_screenshot") or "").strip().lower() not in ("", "skip")
     note = (" We've received your payment confirmation and will verify it shortly." if paid
             else " Once you've sent your e-Transfer, share a screenshot here for confirmation.")
@@ -674,9 +713,19 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     f = q["field"]
     if state.pop("_addr_merged", None):        # assembled from pieces - confirm the full address
         notices.append(i18n.localize(f"Perfect - your full address is: {value}", lang))
+    if f == "service_type":                    # send this service's checklist cards as images
+        state["_images"] = checklists.names_for(value)
     if f == "service_type" and value == "Personal or Individual Tax":        # four checklists upfront
-        for msg in (PERSONAL_TAX_CHECKLIST, POLICIES_MSG, PRICING_INFO,
-                    REP_AUTH_YES, EMAIL_FALLBACK.format(email=settings.etransfer_email)):
+        sent = set(state.get("_images") or [])   # skip text for any card already sent as an image
+        texts = [(PERSONAL_TAX_CHECKLIST, {"personal_tax_1.png", "personal_tax_2.png"}),
+                 (POLICIES_MSG, {"policy.png"}), (PRICING_INFO, {"pricing.png"}),
+                 (REP_AUTH_YES, set()),
+                 (EMAIL_FALLBACK.format(email=settings.etransfer_email), set())]
+        for msg, covered_by in texts:
+            if covered_by and covered_by <= sent:
+                continue
+            msg = (msg.replace("{year}", str(settings.tax_year))             # keep years in sync
+                      .replace("{prev_year}", str(settings.tax_year - 1)))
             notices.append(i18n.localize(msg, lang))
     if f == "is_gig" and value == "Yes":                                     # which platform reports to send
         notices.append(i18n.localize(GIG_SUMMARY_GUIDANCE, lang))
@@ -698,6 +747,7 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     if f == "service_type" and value == "Corporate Tax":                     # upfront checklist
         notices.append(i18n.localize(CORP_FILING_CHECKLIST.format(email=settings.etransfer_email), lang))
     if f == "gst_service" and value == "Register for a GST Number":          # upfront checklist + §4 SLA
+        state["_images"] = checklists.names_for("GST/HST")                   # show the registration card
         notices.append(i18n.localize(GST_REG_CHECKLIST.format(email=settings.etransfer_email), lang))
         notices.append(i18n.localize(PROCUREMENT_SLA, lang))
     if f == "corp_gst_number" and value.strip().lower() == "none":           # §5 CRA helpline

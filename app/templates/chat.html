@@ -39,6 +39,14 @@
       log.appendChild(d);
       log.scrollTop = log.scrollHeight;
     }
+    function addImage(url) {                 // checklist card - click to open full size
+      const d = document.createElement("div");
+      d.className = "msg bot";
+      d.innerHTML = `<a href="${url}" target="_blank" rel="noopener">` +
+                    `<img src="${url}" alt="Checklist" class="checklist-img"></a>`;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
     async function send(message) {
       try {
         const r = await fetch("/api/chat", {
@@ -46,7 +54,9 @@
           body: JSON.stringify({session_id: sid, message})
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
-        add((await r.json()).reply, "bot");
+        const d = await r.json();
+        (d.images || []).forEach(addImage);   // cards first, then the message
+        if (d.reply) add(d.reply, "bot");
       } catch (e) {
         add("⚠️ Something went wrong - please try again.", "bot");
       }

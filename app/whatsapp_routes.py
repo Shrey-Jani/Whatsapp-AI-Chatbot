@@ -75,7 +75,19 @@ async def _process(phone_number_id: str, msg: dict):
         else:
             reply = None
 
+        # Checklist cards the engine flagged for this turn - sent as images before the reply text.
+        state = dict(sess.conversation_state_json or {})
+        cards = state.pop("_images", None) or []
+        if cards:
+            sess.conversation_state_json = state       # consumed - don't resend next turn
         await db.commit()
+
+        for name in cards:
+            try:
+                mid = await upload_media(tenant, checklists.load(name), "image/png", name)
+                await send_image(tenant, wa_number, mid)
+            except Exception as e:
+                log.warning("checklist image %s failed to send: %s", name, e)
         if reply:
             await send_text(tenant, wa_number, reply)
 

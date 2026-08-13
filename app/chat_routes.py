@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import chat_engine, documents, pdf_generator, pricing, submission
+from . import chat_engine, checklists, documents, pdf_generator, pricing, submission
 from .database import get_db
 from .models import ChatSession, Client, Escalation, Tenant
 from .schemas import ChatRequest, ChatResponse
@@ -73,8 +73,8 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
                                   context_json={"enquiry": state.get("others_enquiry")}))
                 state["_enquiry_logged"] = True
                 sess.conversation_state_json = state
-        # Only Personal Tax is a real question-driven filing; Corporate/GST/Business Reg are checklist-only.
-        elif state.get("service_type") == "Personal or Individual Tax" and sess.client_id is None:
+        # Personal Tax and GST/HST are question-driven filings; Corporate/Business Reg are checklist-only.
+        elif state.get("service_type") in ("Personal or Individual Tax", "GST/HST") and sess.client_id is None:
             _c, sub = await submission.materialize(db, tenant, sess)
             # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
             reply += (f"\n\nYour tax summary has been prepared for our team.\n"
@@ -82,8 +82,10 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
             if state.get("third_party_payer") == "Yes":          # shared token (spec §7)
                 reply += "\nThis same reference applies to your payer's file."
 
+    images = [f"{checklists.URL_PREFIX}/{n}" for n in (state.pop("_images", None) or [])]
+    sess.conversation_state_json = state          # persist with _images consumed
     await db.commit()
-    return ChatResponse(reply=reply, done=done)
+    return ChatResponse(reply=reply, done=done, images=images)
 
 
 @router.post("/upload", response_model=ChatResponse)
