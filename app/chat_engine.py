@@ -379,7 +379,9 @@ def _addr_missing(addr: str) -> list[str]:
 def _merge_addr(pending: str, piece: str) -> str:
     """Combine the stored partial address with the just-supplied missing piece(s)."""
     from .question_flow import _POSTAL_RE
-    p = piece.strip().strip(",")
+    p = (piece or "").strip().strip(",")
+    if not p:                                                 # nothing usable - keep what we have
+        return pending
     # A house/unit number in any common shape goes in front: '70', '1802 - 70', '70-1802', 'unit 1802 70'.
     if re.fullmatch(r"(?:(?:unit|apt|suite|#)\s*)?[\d][\d\s\-#/]*[A-Za-z]?", p, re.IGNORECASE):
         return f"{p} {pending}"
@@ -608,7 +610,12 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         state["_done"] = True
         return i18n.localize(CLOSING_MSG, lang), True
 
-    parsed = parse_answer(user_text, q, lang)
+    # A reply that completes a partial address is a fragment ("Brampton On", "L6P 2P3") - sending it
+    # to the LLM makes it return empty ("not a valid address"), so take the raw text instead.
+    if q.get("check") == "postal" and state.get("_addr_pending"):
+        parsed = {"value": user_text.strip(), "confidence": 1.0}
+    else:
+        parsed = parse_answer(user_text, q, lang)
     value = parsed["value"]
     if q["type"] == "date":                   # accept any year / separators, store DD/MM/YYYY
         value = _normalize_date(value) or value

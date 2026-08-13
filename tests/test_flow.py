@@ -48,6 +48,24 @@ def test_session_inactivity_timeout():
     assert "timed out" not in reply2
 
 
+def test_address_pieces_accumulate_with_llm_on(monkeypatch):
+    # Regression: a fragment ("Brampton On") sent to the LLM came back empty ("not a valid address"),
+    # wiping the pending address so the bot kept re-asking. Fragments must bypass the LLM.
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce.llm, "configured", lambda: True)          # LLM on, as in production
+    monkeypatch.setattr(ce, "parse_answer",
+                        lambda t, q, lang="English": {"value": "", "confidence": 1.0})  # LLM drops it
+    monkeypatch.setattr(ce.geocode, "configured", lambda: False)
+    s = {"service_type": "Personal or Individual Tax", "full_name": "A B", "phone": "4160001234",
+         "email": "a@b.com", "sin": "046454286", "sin_document": "skip", "dob": "01/01/1990"}
+    ce.advance(s, "25 bluffwood cres")                               # first pass IS parsed (mocked "")
+    s["_addr_pending"] = "25 bluffwood cres"                         # pending set -> fragments raw
+    reply, _ = ce.advance(s, "Brampton On")
+    assert "postal code" in reply and "street/house number" not in reply   # city accepted, kept street
+    ce.advance(s, "L6P 2P3")
+    assert s["address"] == "25 bluffwood cres Brampton On L6P 2P3"
+
+
 def test_escalation_never_sets_done_and_back_recovers():
     # INVARIANT: escalations set _escalate only, never _done - so 'Back' recovers cleanly and no
     # stray "Have a nice day" / reference number appears. (Regression for the Quebec-resume bugs.)
