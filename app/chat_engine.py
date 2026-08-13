@@ -534,9 +534,9 @@ EMAIL_FALLBACK = (
 # Corporate / Business Registration are NOT question-driven - just show the checklist + hand-off.
 _SERVICE_CHECKLISTS = {"Corporate Tax": CORP_FILING_CHECKLIST,
                        "Business Registration": INCORPORATION_CHECKLIST}
+# EMAIL_FALLBACK already precedes this with the email address - don't repeat it here.
 CHECKLIST_HANDOFF = ("Please review this checklist. If you have any questions, press 'Speak with "
-                     "Staff' - or just share your information and e-Transfer screenshot by email to "
-                     "{email}, and we'll get back to you shortly.")
+                     "Staff'.")
 
 
 def _done_message(answers: dict, lang: str = i18n.DEFAULT) -> str:
@@ -715,12 +715,15 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         notices.append(i18n.localize(f"Perfect - your full address is: {value}", lang))
     if f == "service_type":                    # send this service's checklist cards as images
         state["_images"] = checklists.names_for(value)
-    if f == "service_type" and value == "Personal or Individual Tax":        # four checklists upfront
+    if f == "service_type" and value == "Corporate Tax":                     # upfront checklist
+        notices.append(i18n.localize(CORP_FILING_CHECKLIST.format(email=settings.etransfer_email), lang))
+    if f == "service_type" and value in checklists.IMAGES:   # checklist + policies/pricing/rep ID upfront
         sent = set(state.get("_images") or [])   # skip text for any card already sent as an image
-        texts = [(PERSONAL_TAX_CHECKLIST, {"personal_tax_1.png", "personal_tax_2.png"}),
-                 (POLICIES_MSG, {"policy.png"}), (PRICING_INFO, {"pricing.png"}),
-                 (REP_AUTH_YES, set()),
+        texts = [(POLICIES_MSG, {"policy.png"}), (PRICING_INFO, {"pricing.png"}),
+                 (REP_AUTH_YES, {"cra_rep_id.png"}),
                  (EMAIL_FALLBACK.format(email=settings.etransfer_email), set())]
+        if value == "Personal or Individual Tax":            # the other services have their own below
+            texts.insert(0, (PERSONAL_TAX_CHECKLIST, {"personal_tax.png"}))
         for msg, covered_by in texts:
             if covered_by and covered_by <= sent:
                 continue
@@ -744,10 +747,7 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         notices.append(i18n.localize(
             "No problem - we won't submit your return until you're ready to authorize it. "
             "Our team will follow up with you.", lang))
-    if f == "service_type" and value == "Corporate Tax":                     # upfront checklist
-        notices.append(i18n.localize(CORP_FILING_CHECKLIST.format(email=settings.etransfer_email), lang))
     if f == "gst_service" and value == "Register for a GST Number":          # upfront checklist + §4 SLA
-        state["_images"] = checklists.names_for("GST/HST")                   # show the registration card
         notices.append(i18n.localize(GST_REG_CHECKLIST.format(email=settings.etransfer_email), lang))
         notices.append(i18n.localize(PROCUREMENT_SLA, lang))
     if f == "corp_gst_number" and value.strip().lower() == "none":           # §5 CRA helpline
@@ -769,5 +769,6 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     nxt = get_next_question(answers)
     if nxt is None:                           # last answer → estimate + thank-you + KB link
         state["_done"] = True
-        return _done_message(answers, lang), True
+        done = _done_message(answers, lang)   # keep the notices: checklist-only services end here
+        return (f"{extra}\n\n{done}" if extra else done), True
     return (f"{extra}\n\n{_render(nxt, lang, answers)}" if extra else _render(nxt, lang, answers)), False

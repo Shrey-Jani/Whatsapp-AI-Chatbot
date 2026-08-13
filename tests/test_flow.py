@@ -329,13 +329,24 @@ def test_no_customer_status_step():
     assert "customer_status" not in {q["field"] for q in QUESTIONS}
 
 
-def test_corporate_gst_reg_are_checklist_only():
-    from app.chat_engine import _done_message
+def test_corporate_reg_are_checklist_only(monkeypatch):
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
     # These services ask NO questions - selecting them goes straight to completion (the checklist).
-    for svc in ("Corporate Tax", "GST/HST", "Business Registration"):
+    for svc in ("Corporate Tax", "Business Registration"):
         assert get_next_question({"service_type": svc}) is None
-        msg = _done_message({"service_type": svc})
-        assert "Checklist" in msg and "Speak with Staff" in msg and "raviaccuratetax@gmail.com" in msg
+        msg, done = ce.advance({}, svc)
+        assert done and "Speak with Staff" in msg and "raviaccuratetax@gmail.com" in msg
+        # The checklist itself is a card: an image when we have one on disk, else the text version.
+        from app import checklists
+        assert checklists.names_for(svc) or "Checklist" in msg
+
+
+def test_gst_hst_is_question_driven():
+    # GST/HST is question-driven - selecting it should ask the first question (sub-service choice).
+    q = get_next_question({"service_type": "GST/HST"})
+    assert q is not None
+    assert q["field"] == "gst_service"
 
 
 def test_flow_reaches_address_after_core():
@@ -574,3 +585,22 @@ def test_name_answer_advances_to_phone(monkeypatch):
     assert state["full_name"] == "John Doe"
     assert not done
     assert "mobile number" in reply.lower()
+
+
+def test_every_service_gets_policy_pricing_repid_cards(monkeypatch):
+    # Client ask: each of the four services sends its own checklist card plus the policy,
+    # pricing and CRA rep-ID cards, followed by the "prefer not to use the chatbot" line.
+    import app.chat_engine as ce
+    monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
+    for svc, own in (("Personal or Individual Tax", "personal_tax.png"),
+                     ("Corporate Tax", "corporate_tax.png"),
+                     ("GST/HST", "uber_lyft_gst.png"),
+                     ("Business Registration", "incorporation.png")):
+        state = {}
+        reply, _ = ce.advance(state, svc)
+        assert state["_images"] == [own, "policy.png", "pricing.png", "cra_rep_id.png"], svc
+        assert "prefer not to go through the chatbot" in reply, svc
+        assert "raviaccuratetax@gmail.com" in reply, svc
+        # the cards carry the policy/pricing/rep-ID content - don't repeat it as text
+        assert "Service & Filing Policy" not in reply and "Initial payment: $45" not in reply, svc
+        assert "Rep ID: 64HN5M7" not in reply, svc
