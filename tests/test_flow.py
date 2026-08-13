@@ -496,14 +496,22 @@ def test_new_resident_asked_mycra_and_gets_repid(monkeypatch):
     assert "Rep ID: 64HN5M7" in reply
 
 
-def test_newcomer_gets_world_income_notice(monkeypatch):
+def test_newcomer_asked_if_filed_then_benefits_pitch(monkeypatch):
+    # Client: landed in {prev_year} -> ask "did you file that return?"; No -> benefits guidance,
+    # Yes -> nothing further. The world-income message must NOT appear on this path.
     import app.chat_engine as ce
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    state = dict(CORE, address="1 St, Toronto ON M5V 3L9", marital_status="Single",
-                 marital_changed="No", is_student="No", prior_noa="skip")   # landed_2024 is the next question
-    reply, _ = ce.advance(state, "Yes")            # landed in Canada
-    assert "worldwide income" in reply.lower()     # guidance stays; links removed per client
-    assert "canada.ca" not in reply                # all resource links removed
+    seed = dict(CORE, address="1 St, Toronto ON M5V 3L9", marital_status="Single",
+                marital_changed="No", is_student="No", prior_noa="skip")
+    s = dict(seed)
+    reply, _ = ce.advance(s, "Yes")                          # landed in Canada -> landing date
+    assert "worldwide income" not in reply.lower()
+    ce.advance(s, "15/06/2025")                              # landing date
+    assert ce.get_next_question(ce._answers(s))["field"] == "filed_last_year"
+    no_reply, _ = ce.advance(dict(s), "No")                  # didn't file -> benefits guidance
+    assert "Ontario Trillium Benefit" in no_reply and "Groceries and Essentials" in no_reply
+    yes_reply, _ = ce.advance(dict(s), "Yes")                # filed -> no extra guidance
+    assert "Ontario Trillium Benefit" not in yes_reply
 
 
 def test_sin_encryption_round_trip():

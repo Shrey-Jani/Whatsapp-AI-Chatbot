@@ -101,7 +101,19 @@ MARRIED = lambda a: a.get("marital_status") in ("Married", "Common-Law")        
 SPOUSE_HERE = lambda a: MARRIED(a) and a.get("spouse_in_canada") == "Yes"          # noqa: E731
 NOT_SINGLE = lambda a: a.get("marital_status") != "Single"                         # noqa: E731
 SPOUSE_LEFT = lambda a: MARRIED(a) and _left_canada(a)                             # noqa: E731
-FILED_Q = lambda a: a.get("landed_2024") != "Yes"                                  # noqa: E731
+FILED_Q = lambda a: a.get("landed_2024") == "Yes"   # newcomers: did they file that year's return?
+
+# Newcomer who has NOT filed their landing-year return - why they should (client's wording).
+NEWCOMER_FILE_BENEFITS = (
+    "We recommend filing your {prev_year} Income Tax and Benefit Return, even if you had little or "
+    "no income.\n\n"
+    "Since you became a resident of Canada in {prev_year}, filing your {prev_year} tax return allows "
+    "CRA to determine all the benefits and credits you may be eligible for, including:\n"
+    "- Canada Groceries and Essentials Benefit (formerly GST/HST Credit)\n"
+    "- Ontario Trillium Benefit (OTB)\n"
+    "- Other applicable federal and provincial benefits and credits\n\n"
+    "Even if you had no income in {prev_year}, filing your return may still allow you to receive "
+    "eligible benefit payments.")
 
 # Mandated verbatim legal text (spec §4) - shown before GST filing and on the mandatory-GST flag.
 GST_WARNING = ("Warning: Failure to file your required GST returns will prompt the CRA to "
@@ -328,8 +340,9 @@ _PERSONAL_RAW = [
                "(SIN optional). Include children whether or not they live with you.",
      "ai_parse": "Return the child/dependent details as given."},
 
+    # Newcomers only (landed in {prev_year}) - No triggers the benefits guidance in advance().
     {"id": 24, "field": "filed_last_year", "type": "boolean", "options": ["Yes", "No"],
-     "condition": FILED_Q, "prompt": "Did you file a Canadian tax return last year ({prev_year})?",
+     "condition": FILED_Q, "prompt": "Did you file your {prev_year} tax return?",
      "ai_parse": "Return Yes or No."},
 
     {"id": 25, "field": "income_slips", "type": "file",

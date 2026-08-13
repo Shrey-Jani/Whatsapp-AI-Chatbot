@@ -17,7 +17,7 @@ from .question_flow import (AUTHORIZATION_MSG, CORP_FILING_CHECKLIST, CRA_HELPLI
                             ETRANSFER_DIRECTIVE, GIG_GST_NETFILE_HELP, GST_REG_CHECKLIST, GST_WARNING,
                             INCORPORATION_CHECKLIST, PROCUREMENT_SLA, QUESTIONS,
                             RENT_NO_PROOF_GUIDANCE, REP_AUTH_NO, REP_AUTH_YES, GIG_SUMMARY_GUIDANCE,
-                            RIDESHARE_PLATFORMS, WORLD_INCOME, in_quebec)
+                            NEWCOMER_FILE_BENEFITS, RIDESHARE_PLATFORMS, in_quebec)
 
 SESSION_TIMEOUT = 5 * 60   # seconds of inactivity before an unfinished session restarts
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
@@ -702,8 +702,11 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     if f == "has_mycra" and value == "No":                                   # §2A no account -> send NOA
         notices.append(i18n.localize(REP_AUTH_NO.format(year=settings.tax_year), lang))
     # is_student == "No" -> the prior_noa question handles the previous-student NOA (upload or skip).
-    if f == "landed_2024" and value == "Yes":                                # §2B world income
-        notices.append(i18n.localize(WORLD_INCOME, lang))
+    # Landed in {prev_year} -> we ask whether they filed that year's return (no world-income message
+    # here, per the client). Answering No gets the benefits guidance below.
+    if f == "filed_last_year" and value == "No":
+        notices.append(i18n.localize(
+            NEWCOMER_FILE_BENEFITS.replace("{prev_year}", str(settings.tax_year - 1)), lang))
 
     extra = "\n\n".join(notices)
     nxt = get_next_question(answers)
