@@ -9,15 +9,13 @@ from pathlib import Path
 DIR = Path(__file__).parent / "static" / "checklists"
 URL_PREFIX = "/static/checklists"
 
-# Sent after every service's own checklist - same three cards for all of them.
-COMMON = ["policy.png", "pricing.png", "cra_rep_id.png"]
-
-# service_type -> the cards to send, in order.
+# service_type -> the cards to send, in order. Per the client: only Personal Tax gets the
+# policy/pricing/rep-ID cards; the other services send their own checklist and nothing else.
 IMAGES = {
-    "Personal or Individual Tax": ["personal_tax.png", *COMMON],
-    "Corporate Tax": ["corporate_tax.png", *COMMON],
-    "GST/HST": ["uber_lyft_gst.png", *COMMON],
-    "Business Registration": ["incorporation.png", *COMMON],
+    "Personal or Individual Tax": ["personal_tax.png", "pricing.png", "policy.png", "cra_rep_id.png"],
+    "Corporate Tax": ["corporate_tax.png"],
+    "GST/HST": ["uber_lyft_gst.png"],
+    "Business Registration": ["incorporation.png"],
 }
 
 

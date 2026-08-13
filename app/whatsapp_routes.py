@@ -144,6 +144,19 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
             db.add(Escalation(tenant_id=tenant.id, session_id=sess.id, reason="general enquiry",
                               context_json={"enquiry": state.get("others_enquiry")}))
             state["_enquiry_logged"] = True
+    elif state.get("shared_info"):        # checklist-only service - details typed straight into chat
+        if not state.get("_shared_logged"):      # one queue entry per session; state holds them all
+            db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
+                              reason=f"{state.get('service_type')} - details shared in chat",
+                              context_json={"shared_info": state["shared_info"]}))
+            state["_shared_logged"] = True
+        op = _operator(tenant)                   # forward each message so staff see it as it arrives
+        if op:
+            try:
+                await send_text(tenant, op, f"📄 {state.get('service_type')} details from "
+                                            f"{sess.wa_number}:\n\n{state['shared_info'][-1]}")
+            except Exception as e:
+                log.warning("shared-info forward failed: %s", e)
     # Only Personal Tax is a real filing; Corporate/GST/Business Reg are checklist-only.
     elif (done and state.get("_done") and sess.client_id is None
           and state.get("service_type") == "Personal or Individual Tax"):

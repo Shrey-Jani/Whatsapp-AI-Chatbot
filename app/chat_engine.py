@@ -528,15 +528,25 @@ PRICING_INFO = (
     "- Self-employment / delivery income: $75 and above\n"
     "- GST return filing: $50\n"
     "Your initial payment is adjusted toward your total fee; we only request the remaining balance (if any).")
+# Option 1 only - the chatbot asks the questions, so email is the alternative to answering here.
 EMAIL_FALLBACK = (
     "If you'd prefer not to go through the chatbot, take a screenshot of this checklist and email "
     "your information to {email}, and our team will get back to you shortly.")
-# Corporate / Business Registration are NOT question-driven - just show the checklist + hand-off.
-_SERVICE_CHECKLISTS = {"Corporate Tax": CORP_FILING_CHECKLIST,
-                       "Business Registration": INCORPORATION_CHECKLIST}
-# EMAIL_FALLBACK already precedes this with the email address - don't repeat it here.
-CHECKLIST_HANDOFF = ("Please review this checklist. If you have any questions, press 'Speak with "
-                     "Staff'.")
+# Text version of each service's checklist card - only used when the card is missing from disk.
+SERVICE_CHECKLISTS = {"Personal or Individual Tax": PERSONAL_TAX_CHECKLIST,
+                      "Corporate Tax": CORP_FILING_CHECKLIST,
+                      "GST/HST": GST_REG_CHECKLIST,
+                      "Business Registration": INCORPORATION_CHECKLIST}
+# Options 2-4: no questions - the client sends their details here in chat or by email, and staff
+# take it from there. Closing line for those three, plus the ack for whatever they send after it.
+CHECKLIST_ONLY = ("Corporate Tax", "GST/HST", "Business Registration")
+CHECKLIST_HANDOFF = (
+    "Here is the checklist. Please go through it and share your information and payment e-Transfer "
+    "screenshot right here in this chat, or by email to {email} - whichever is easier for you. "
+    "If you have any questions, press 'Speak with Staff'. Our team will review what you send and "
+    "get back to you shortly. Thank you.")
+SHARED_INFO_ACK = ("Thank you - we've received this and passed it to our team. You can keep sending "
+                   "anything else here, and someone will get back to you shortly.")
 
 
 def _done_message(answers: dict, lang: str = i18n.DEFAULT) -> str:
@@ -545,13 +555,8 @@ def _done_message(answers: dict, lang: str = i18n.DEFAULT) -> str:
     if service == "Others":                           # not a filing - just an enquiry hand-off
         return i18n.localize("Thank you - our team will review your enquiry and contact you "
                              "shortly.", lang)
-    checklist = _SERVICE_CHECKLISTS.get(service)      # Corporate / GST / Business Reg: checklist only
-    if checklist:
-        handoff = i18n.localize(CHECKLIST_HANDOFF.format(email=settings.etransfer_email), lang)
-        if checklists.names_for(service):             # the card is sent as an image - text is redundant
-            return handoff
-        return (i18n.localize(checklist.format(email=settings.etransfer_email), lang) + "\n\n"
-                + handoff)
+    if service in CHECKLIST_ONLY:                     # no questions asked - the hand-off IS the closing
+        return i18n.localize(CHECKLIST_HANDOFF.format(email=settings.etransfer_email), lang)
     paid = (answers.get("payment_screenshot") or "").strip().lower() not in ("", "skip")
     note = (" We've received your payment confirmation and will verify it shortly." if paid
             else " Once you've sent your e-Transfer, share a screenshot here for confirmation.")
@@ -645,8 +650,13 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
                 return (f"{i18n.localize('Sure - let us update that.', lang)}\n\n"
                         f"{_render(nq, lang, _answers(state))}", False)
 
-    if state.get("_done") or q is None:       # intake already finished - just close politely
+    if state.get("_done") or q is None:       # intake already finished
         state["_done"] = True
+        if answers.get("service_type") in CHECKLIST_ONLY:
+            # No questions were asked, so anything they send now IS their submission - keep it for
+            # staff rather than closing the conversation on them.
+            state.setdefault("shared_info", []).append(user_text)
+            return i18n.localize(SHARED_INFO_ACK, lang), True
         return i18n.localize(CLOSING_MSG, lang), True
 
     # A reply that completes a partial address is a fragment ("Brampton On", "L6P 2P3") - sending it
@@ -713,19 +723,18 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     f = q["field"]
     if state.pop("_addr_merged", None):        # assembled from pieces - confirm the full address
         notices.append(i18n.localize(f"Perfect - your full address is: {value}", lang))
-    if f == "service_type":                    # send this service's checklist cards as images
+    if f == "service_type" and value in checklists.IMAGES:   # the service's checklist cards, upfront
         state["_images"] = checklists.names_for(value)
-    if f == "service_type" and value == "Corporate Tax":                     # upfront checklist
-        notices.append(i18n.localize(CORP_FILING_CHECKLIST.format(email=settings.etransfer_email), lang))
-    if f == "service_type" and value in checklists.IMAGES:   # checklist + policies/pricing/rep ID upfront
-        sent = set(state.get("_images") or [])   # skip text for any card already sent as an image
-        texts = [(POLICIES_MSG, {"policy.png"}), (PRICING_INFO, {"pricing.png"}),
-                 (REP_AUTH_YES, {"cra_rep_id.png"}),
-                 (EMAIL_FALLBACK.format(email=settings.etransfer_email), set())]
-        if value == "Personal or Individual Tax":            # the other services have their own below
-            texts.insert(0, (PERSONAL_TAX_CHECKLIST, {"personal_tax.png"}))
+        sent = set(state["_images"])             # a card carries the text - don't repeat it as text
+        texts = [(SERVICE_CHECKLISTS[value].replace("{email}", settings.etransfer_email),
+                  {checklists.IMAGES[value][0]})]
+        if value == "Personal or Individual Tax":            # only option 1 gets these three (client)
+            texts += [(PRICING_INFO, {"pricing.png"}), (POLICIES_MSG, {"policy.png"}),
+                      (REP_AUTH_YES, {"cra_rep_id.png"})]
+        if value not in CHECKLIST_ONLY:   # those close with CHECKLIST_HANDOFF from _done_message
+            texts.append((EMAIL_FALLBACK.format(email=settings.etransfer_email), set()))
         for msg, covered_by in texts:
-            if covered_by and covered_by <= sent:
+            if covered_by and covered_by <= sent:   # empty set == always shown
                 continue
             msg = (msg.replace("{year}", str(settings.tax_year))             # keep years in sync
                       .replace("{prev_year}", str(settings.tax_year - 1)))
@@ -747,14 +756,12 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         notices.append(i18n.localize(
             "No problem - we won't submit your return until you're ready to authorize it. "
             "Our team will follow up with you.", lang))
-    if f == "gst_service" and value == "Register for a GST Number":          # upfront checklist + §4 SLA
-        notices.append(i18n.localize(GST_REG_CHECKLIST.format(email=settings.etransfer_email), lang))
-        notices.append(i18n.localize(PROCUREMENT_SLA, lang))
+    if f == "gst_service" and value == "Register for a GST Number":          # §4 SLA
+        notices.append(i18n.localize(PROCUREMENT_SLA, lang))   # checklist already sent as a card
     if f == "corp_gst_number" and value.strip().lower() == "none":           # §5 CRA helpline
         notices.append(CRA_HELPLINE)           # mandated verbatim (+ phone)
-    if f == "reg_type" and value == "New Incorporation":                     # upfront checklist + §6 e-Transfer
-        notices.append(i18n.localize(INCORPORATION_CHECKLIST.format(email=settings.etransfer_email), lang))
-        notices.append(ETRANSFER_DIRECTIVE)    # mandated verbatim
+    if f == "reg_type" and value == "New Incorporation":                     # §6 e-Transfer
+        notices.append(ETRANSFER_DIRECTIVE)    # mandated verbatim; checklist already sent as a card
     # has_mycra == Yes is handled by the rep_auth_ack question (steps + "Ok" to continue).
     if f == "has_mycra" and value == "No":                                   # §2A no account -> send NOA
         notices.append(i18n.localize(REP_AUTH_NO.format(year=settings.tax_year), lang))

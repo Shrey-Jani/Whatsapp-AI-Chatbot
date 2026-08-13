@@ -329,24 +329,35 @@ def test_no_customer_status_step():
     assert "customer_status" not in {q["field"] for q in QUESTIONS}
 
 
-def test_corporate_reg_are_checklist_only(monkeypatch):
+def test_only_personal_tax_asks_questions():
+    # Client's decision: options 2-4 show the checklist and collect nothing in chat.
+    from app.question_flow import FILING_SERVICES
+    assert get_next_question({"service_type": "Personal or Individual Tax"})["field"] == "full_name"
+    for svc in ("Corporate Tax", "GST/HST", "Business Registration"):
+        assert get_next_question({"service_type": svc}) is None, svc
+        assert svc not in FILING_SERVICES, svc
+
+
+def test_checklist_only_services_keep_whatever_client_sends(monkeypatch):
+    # Options 2-4 tell the client to share details in the chat, so the finished session must
+    # capture them for staff instead of replying "Have a nice day".
     import app.chat_engine as ce
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    # These services ask NO questions - selecting them goes straight to completion (the checklist).
-    for svc in ("Corporate Tax", "Business Registration"):
-        assert get_next_question({"service_type": svc}) is None
-        msg, done = ce.advance({}, svc)
-        assert done and "Speak with Staff" in msg and "raviaccuratetax@gmail.com" in msg
-        # The checklist itself is a card: an image when we have one on disk, else the text version.
-        from app import checklists
-        assert checklists.names_for(svc) or "Checklist" in msg
+    st = {}
+    msg, done = ce.advance(st, "Corporate Tax")
+    assert done and "share your information" in msg and "raviaccuratetax@gmail.com" in msg
+    reply, _ = ce.advance(st, "Acme Ltd, HST 123456789, director John Doe")
+    assert "received" in reply.lower() and "nice day" not in reply.lower()
+    ce.advance(st, "sending the e-Transfer screenshot now")
+    assert st["shared_info"] == ["Acme Ltd, HST 123456789, director John Doe",
+                                 "sending the e-Transfer screenshot now"]
 
 
-def test_gst_hst_is_question_driven():
-    # GST/HST is question-driven - selecting it should ask the first question (sub-service choice).
-    q = get_next_question({"service_type": "GST/HST"})
-    assert q is not None
-    assert q["field"] == "gst_service"
+def test_others_still_ends_without_payment():
+    # "Others" is an enquiry, not a filing - no payment/authorization steps.
+    from app.question_flow import FILING_SERVICES
+    assert "Others" not in FILING_SERVICES
+    assert get_next_question({"service_type": "Others", "others_enquiry": "hi"}) is None
 
 
 def test_flow_reaches_address_after_core():
@@ -587,20 +598,25 @@ def test_name_answer_advances_to_phone(monkeypatch):
     assert "mobile number" in reply.lower()
 
 
-def test_every_service_gets_policy_pricing_repid_cards(monkeypatch):
-    # Client ask: each of the four services sends its own checklist card plus the policy,
-    # pricing and CRA rep-ID cards, followed by the "prefer not to use the chatbot" line.
+def test_service_checklist_cards(monkeypatch):
+    # Client's spec: option 1 sends four cards; options 2-4 send only their own checklist.
     import app.chat_engine as ce
     monkeypatch.setattr(ce, "parse_answer", lambda t, q, lang="English": {"value": t, "confidence": 1.0})
-    for svc, own in (("Personal or Individual Tax", "personal_tax.png"),
-                     ("Corporate Tax", "corporate_tax.png"),
-                     ("GST/HST", "uber_lyft_gst.png"),
-                     ("Business Registration", "incorporation.png")):
+    cards = {"Personal or Individual Tax": ["personal_tax.png", "pricing.png", "policy.png",
+                                            "cra_rep_id.png"],
+             "Corporate Tax": ["corporate_tax.png"],
+             "GST/HST": ["uber_lyft_gst.png"],
+             "Business Registration": ["incorporation.png"]}
+    for svc, expected in cards.items():
         state = {}
         reply, _ = ce.advance(state, svc)
-        assert state["_images"] == [own, "policy.png", "pricing.png", "cra_rep_id.png"], svc
-        assert "prefer not to go through the chatbot" in reply, svc
+        assert state["_images"] == expected, svc
         assert "raviaccuratetax@gmail.com" in reply, svc
-        # the cards carry the policy/pricing/rep-ID content - don't repeat it as text
-        assert "Service & Filing Policy" not in reply and "Initial payment: $45" not in reply, svc
-        assert "Rep ID: 64HN5M7" not in reply, svc
+        # a card carries the checklist - it must not also arrive as a wall of text
+        assert "CLIENT INFORMATION CHECKLIST" not in reply, svc
+        if svc == "Personal or Individual Tax":       # only option 1 gets policy/pricing/rep ID
+            assert "prefer not to go through the chatbot" in reply
+            assert "Service & Filing Policy" not in reply and "Initial payment: $45" not in reply
+            assert "Rep ID: 64HN5M7" not in reply
+        else:
+            assert "Speak with Staff" in reply and "Thank you" in reply, svc

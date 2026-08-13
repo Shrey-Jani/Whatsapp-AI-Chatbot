@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import chat_engine, checklists, documents, pdf_generator, pricing, submission
 from .database import get_db
 from .models import ChatSession, Client, Escalation, Tenant
+from .question_flow import FILING_SERVICES
 from .schemas import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api")
@@ -73,14 +74,20 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
                                   context_json={"enquiry": state.get("others_enquiry")}))
                 state["_enquiry_logged"] = True
                 sess.conversation_state_json = state
-        # Personal Tax and GST/HST are question-driven filings; Corporate/Business Reg are checklist-only.
-        elif state.get("service_type") in ("Personal or Individual Tax", "GST/HST") and sess.client_id is None:
+        # Only question-driven filings produce a submission; checklist-only services never do.
+        elif state.get("service_type") in FILING_SERVICES and sess.client_id is None:
             _c, sub = await submission.materialize(db, tenant, sess)
             # When Meta is wired, deliver the PDF + slips to the operator's WhatsApp here.
             reply += (f"\n\nYour tax summary has been prepared for our team.\n"
                       f"Your reference number: {sub.reference_number}")
             if state.get("third_party_payer") == "Yes":          # shared token (spec §7)
                 reply += "\nThis same reference applies to your payer's file."
+
+    if state.get("shared_info") and not state.get("_shared_logged"):   # checklist-only: details in chat
+        db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
+                          reason=f"{state.get('service_type')} - details shared in chat",
+                          context_json={"shared_info": state["shared_info"]}))
+        state["_shared_logged"] = True
 
     images = [f"{checklists.URL_PREFIX}/{n}" for n in (state.pop("_images", None) or [])]
     sess.conversation_state_json = state          # persist with _images consumed
