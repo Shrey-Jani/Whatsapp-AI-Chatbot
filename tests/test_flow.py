@@ -546,7 +546,8 @@ def test_newcomer_asked_if_filed_then_benefits_pitch(monkeypatch):
     s = dict(seed)
     reply, _ = ce.advance(s, "Yes")                          # landed in Canada -> landing date
     assert "worldwide income" not in reply.lower()
-    ce.advance(s, "15/06/2025")                              # landing date
+    from app.config import settings                          # landing date must be prev_year
+    ce.advance(s, f"15/06/{settings.tax_year - 1}")
     assert ce.get_next_question(ce._answers(s))["field"] == "filed_last_year"
     no_reply, _ = ce.advance(dict(s), "No")                  # didn't file -> benefits guidance
     assert "Ontario Trillium Benefit" in no_reply and "Groceries and Essentials" in no_reply

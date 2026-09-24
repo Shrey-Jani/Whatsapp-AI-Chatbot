@@ -36,14 +36,16 @@ class Settings(BaseSettings):
     # Admin dashboard
     admin_password: str = "changeme"
 
-    # Filing year. Leave TAX_YEAR unset to auto-derive from the current date (advances every
-    # Jan 1, no yearly edits); set TAX_YEAR to pin a specific year. All {year} prompts, the
-    # landing/"filed last year" questions (year-1), and slip matching follow this one value.
+    # Filing year. Leave TAX_YEAR unset to auto-derive (advances every Jan 1, no yearly edits);
+    # set TAX_YEAR to pin a specific year. All {year} prompts, the landing/"filed last year"
+    # questions (year-1), and slip matching follow this one value.
     tax_year_override: int = Field(default=0, validation_alias="TAX_YEAR")
 
     @property
     def tax_year(self) -> int:
-        return self.tax_year_override or datetime.now().year
+        # A tax year can only be filed once it has ended, so the year being filed all through
+        # 2026 is 2025. Rolls over on Jan 1, when the next year's slips start arriving.
+        return self.tax_year_override or datetime.now().year - 1
 
     # Firm e-Transfer address shown to clients at payment (from the client's checklist cards).
     etransfer_email: str = "raviaccuratetax@gmail.com"
