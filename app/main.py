@@ -48,6 +48,17 @@ async def on_unhandled(request: Request, exc: Exception):
                                  "done": False, "detail": "internal server error"})
 
 
+@app.get("/health")
+async def health():
+    """Liveness + a real DB round-trip. An external cron hits this so the Supabase project
+    doesn't pause for inactivity (free tier pauses after a week, silently killing the bot)."""
+    from sqlalchemy import text
+    from .database import Session
+    async with Session() as db:
+        await db.execute(text("SELECT 1"))
+    return {"ok": True}
+
+
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
