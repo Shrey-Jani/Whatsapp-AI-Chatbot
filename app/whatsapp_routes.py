@@ -4,15 +4,20 @@ from fastapi import APIRouter, BackgroundTasks, Request, Response
 from sqlalchemy import select
 
 from . import chat_engine, documents, pdf_generator, submission
+from .admin_routes import RESET_KEY, issue_reset_code
 from .config import settings
 from .database import Session
-from .models import ChatSession, Escalation, Tenant
+from .models import ChatSession, Escalation, Setting, Tenant
 from .whatsapp import download_media, send_document, send_text, upload_media, verify_signature
 
 log = logging.getLogger("taxbot")
 router = APIRouter()
 
 MEDIA_TYPES = ("image", "document", "audio", "video")
+# Dashboard password recovery: the operator texts one of these and the bot replies with a
+# code. Client-initiated, so it is never blocked by WhatsApp's 24-hour window - which is
+# exactly when someone locked out of the dashboard would need it.
+RESET_WORDS = ("reset", "reset password", "forgot password", "reset my password")
 _EXT = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 
 
@@ -68,6 +73,9 @@ async def _process(phone_number_id: str, msg: dict):
             await db.flush()  # need sess.id for documents/escalations
 
         mtype = msg.get("type")
+        if mtype == "text" and await _maybe_send_reset_code(db, tenant, wa_number, msg["text"]["body"]):
+            await db.commit()
+            return                                 # a reset request is not part of the intake flow
         if mtype in MEDIA_TYPES:
             reply = await _save_media(db, tenant, sess, msg, mtype)
         elif mtype == "text":
@@ -90,6 +98,28 @@ async def _process(phone_number_id: str, msg: dict):
                 log.warning("checklist image %s failed to send: %s", name, e)
         if reply:
             await send_text(tenant, wa_number, reply)
+
+
+async def _maybe_send_reset_code(db, tenant, wa_number: str, text: str) -> bool:
+    """Operator asked to reset the dashboard password -> text them a code. True if handled."""
+    if (text or "").strip().lower() not in RESET_WORDS:
+        return False
+    if wa_number != _operator(tenant):             # only the staff number can start a reset
+        return False
+    code, stored = issue_reset_code()
+    row = await db.get(Setting, RESET_KEY)
+    if row is None:
+        db.add(Setting(key=RESET_KEY, value=stored))
+    else:
+        row.value = stored
+    try:
+        await send_text(tenant, wa_number,
+                        f"Your dashboard password reset code is {code}\n\n"
+                        "Enter it on the admin login page under 'Forgotten your password?'. "
+                        "It expires in 10 minutes. If you didn't ask for this, ignore this message.")
+    except Exception as e:
+        log.warning("reset code send failed: %s", e)
+    return True
 
 
 async def _save_media(db, tenant, sess, msg, mtype) -> str:

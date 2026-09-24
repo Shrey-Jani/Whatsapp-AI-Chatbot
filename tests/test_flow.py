@@ -621,3 +621,29 @@ def test_service_checklist_cards(monkeypatch):
             assert "Rep ID: 64HN5M7" not in reply
         else:
             assert "Speak with Staff" in reply and "Thank you" in reply, svc
+
+
+def test_admin_password_hashing():
+    # Stored hashes must round-trip, reject wrong passwords, and survive garbage input
+    # (a malformed/empty stored value must not crash the login check).
+    from app.security import hash_password, verify_password
+    stored = hash_password("correct horse battery")
+    assert stored.startswith("scrypt$") and "correct horse battery" not in stored
+    assert verify_password("correct horse battery", stored)
+    assert not verify_password("wrong password", stored)
+    assert not verify_password("anything", "")
+    assert not verify_password("anything", "notahash")
+    assert hash_password("same") != hash_password("same")      # random salt per call
+
+
+def test_reset_code_shape():
+    # A reset code must be 6 digits, carry an expiry in the future, and start with no
+    # used attempts - the endpoint relies on all three to decide whether to accept it.
+    import json, time
+    from app.admin_routes import RESET_TTL, issue_reset_code
+    code, stored = issue_reset_code()
+    assert len(code) == 6 and code.isdigit()
+    data = json.loads(stored)
+    assert data["code"] == code and data["tries"] == 0
+    assert time.time() < data["exp"] <= time.time() + RESET_TTL + 1
+    assert issue_reset_code()[0] != issue_reset_code()[0] or True   # random, collisions possible

@@ -71,3 +71,7 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f7; color
   border: 1px solid #dfe4e8;
   display: block;
 }
+
+/* `hidden` must beat component display rules - .modal sets display:flex, which otherwise
+   overrides the browser's [hidden]{display:none} and leaves the modal permanently on top. */
+[hidden] { display: none !important; }

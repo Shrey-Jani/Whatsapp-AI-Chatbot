@@ -21,6 +21,19 @@ class Tenant(Base):
     config: Mapped[dict] = mapped_column(JSONB, default=dict)  # pricing, workflows, languages...
 
 
+class Setting(Base):
+    """Runtime-editable settings (currently just the admin password hash).
+
+    A new table, so create_all creates it - unlike a new column, which it would silently skip.
+    Deleting the admin_password_hash row restores the ADMIN_PASSWORD env var as the login,
+    which is the recovery path when someone forgets the password.
+    """
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)
+
+
 class Client(Base):
     __tablename__ = "clients"
 

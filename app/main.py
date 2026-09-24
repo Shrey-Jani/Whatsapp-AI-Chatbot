@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .admin_routes import reset_router as admin_reset_router
 from .admin_routes import router as admin_router
 from .chat_routes import router as chat_router
 from .database import init_db
@@ -34,6 +35,7 @@ app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 app.include_router(whatsapp_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
+app.include_router(admin_reset_router)   # forgot-password, no auth by design
 
 
 @app.exception_handler(Exception)

@@ -1,4 +1,7 @@
-"""Admin dashboard API. Every route requires the X-Admin-Key header == settings.admin_password."""
+"""Admin dashboard API. Every route requires the X-Admin-Key header to match the admin password."""
+import hmac
+import json
+import time
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -7,13 +10,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import chat_engine, pdf_generator, storage
 from .config import settings
 from .database import get_db
-from .models import ChatSession, Client, Document, Escalation, Submission, Tenant
-from .security import reveal_sin
+from .models import ChatSession, Client, Document, Escalation, Setting, Submission, Tenant
+from .security import hash_password, reveal_sin, verify_password
 from .whatsapp import send_text
 
 
-def require_admin(x_admin_key: str = Header(default="")):
-    if x_admin_key != settings.admin_password:
+ADMIN_PW_KEY = "admin_password_hash"   # Setting row holding the hash, once one is set
+RESET_KEY = "admin_reset_code"         # Setting row holding an in-progress reset
+RESET_TTL = 10 * 60                    # seconds a reset code stays valid
+RESET_MAX_TRIES = 5                    # wrong guesses before the code is burned
+
+
+async def require_admin(x_admin_key: str = Header(default=""),
+                        db: AsyncSession = Depends(get_db)):
+    """Check the stored password hash; fall back to ADMIN_PASSWORD until one is set.
+
+    Deleting the settings row is the forgot-password recovery: the env var works again.
+    """
+    stored = await db.get(Setting, ADMIN_PW_KEY)
+    ok = (verify_password(x_admin_key, stored.value) if stored
+          else hmac.compare_digest(x_admin_key, settings.admin_password))
+    if not ok:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
@@ -23,6 +40,25 @@ router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 class StatusUpdate(BaseModel):
     status: str | None = None
     admin_notes: str | None = None
+
+
+class PasswordChange(BaseModel):
+    new_password: str
+
+
+@router.post("/password")
+async def change_password(body: PasswordChange, db: AsyncSession = Depends(get_db)):
+    """Set a new admin password. The caller already proved the current one via require_admin."""
+    pw = (body.new_password or "").strip()
+    if len(pw) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters.")
+    row = await db.get(Setting, ADMIN_PW_KEY)
+    if row is None:
+        db.add(Setting(key=ADMIN_PW_KEY, value=hash_password(pw)))
+    else:
+        row.value = hash_password(pw)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/submissions")
@@ -119,3 +155,56 @@ async def resolve_escalation(esc_id: int, db: AsyncSession = Depends(get_db)):
                     print(f"[admin] resume send failed: {e}")
     await db.commit()
     return {"resolved": True}
+
+
+# ---- Forgot password ----------------------------------------------------------------
+# The staff member messages the bot on WhatsApp to get a code (see whatsapp_routes), then
+# enters it here with a new password. This router is deliberately NOT behind require_admin -
+# the code is the proof of identity, since a locked-out user has no password to present.
+
+reset_router = APIRouter(prefix="/api/admin")
+
+
+class PasswordReset(BaseModel):
+    code: str
+    new_password: str
+
+
+def issue_reset_code() -> tuple[str, str]:
+    """A fresh 6-digit code and the Setting value that records it. Returns (code, stored)."""
+    import secrets
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    return code, json.dumps({"code": code, "exp": int(time.time()) + RESET_TTL, "tries": 0})
+
+
+@reset_router.post("/reset-password")
+async def reset_password(body: PasswordReset, db: AsyncSession = Depends(get_db)):
+    row = await db.get(Setting, RESET_KEY)
+    if row is None:
+        raise HTTPException(400, "No reset in progress. Message the bot on WhatsApp first.")
+
+    data = json.loads(row.value)
+    if time.time() > data["exp"]:
+        await db.delete(row); await db.commit()
+        raise HTTPException(400, "That code has expired. Please request a new one.")
+    if data["tries"] >= RESET_MAX_TRIES:
+        await db.delete(row); await db.commit()
+        raise HTTPException(400, "Too many incorrect attempts. Please request a new code.")
+    if not hmac.compare_digest(body.code.strip(), data["code"]):
+        data["tries"] += 1                      # burn an attempt so the code can't be brute-forced
+        row.value = json.dumps(data)
+        await db.commit()
+        raise HTTPException(400, "Incorrect code.")
+
+    pw = (body.new_password or "").strip()
+    if len(pw) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters.")
+
+    stored = await db.get(Setting, ADMIN_PW_KEY)
+    if stored is None:
+        db.add(Setting(key=ADMIN_PW_KEY, value=hash_password(pw)))
+    else:
+        stored.value = hash_password(pw)
+    await db.delete(row)                        # single use
+    await db.commit()
+    return {"ok": True}

@@ -44,3 +44,25 @@ def reveal_sin(stored: str | None) -> str | None:
 
 def digits(sin: str | None) -> str:
     return "".join(c for c in (sin or "") if c.isdigit())
+
+
+# ---- Admin password hashing (stdlib scrypt; no extra dependency) ----
+# Stored as "scrypt$<salt hex>$<hash hex>" so the format is self-describing.
+
+def hash_password(password: str) -> str:
+    import hashlib, secrets
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(password.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+    return f"scrypt${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    import hashlib, hmac
+    try:
+        scheme, salt_hex, dk_hex = (stored or "").split("$")
+    except ValueError:
+        return False
+    if scheme != "scrypt":
+        return False
+    dk = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2 ** 14, r=8, p=1, dklen=32)
+    return hmac.compare_digest(dk.hex(), dk_hex)
