@@ -647,3 +647,19 @@ def test_reset_code_shape():
     assert data["code"] == code and data["tries"] == 0
     assert time.time() < data["exp"] <= time.time() + RESET_TTL + 1
     assert issue_reset_code()[0] != issue_reset_code()[0] or True   # random, collisions possible
+
+
+def test_completed_session_accepts_a_new_filing_next_year():
+    # A finished filing must not dead-end the client forever - they come back every tax year.
+    # Within a day a follow-up still gets the closing line; after that it starts a new filing.
+    import time
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    done = {"service_type": "Personal or Individual Tax", "_done": True,
+            "_last_at": time.time() - 60}
+    reply, _ = ce.advance(dict(done), "thanks")            # same day -> still closed
+    assert "nice day" in reply.lower()
+    old = dict(done, _last_at=time.time() - ce.DONE_TIMEOUT - 1)
+    reply, closed = ce.advance(old, "hello")               # next season -> fresh filing
+    assert not closed and "Welcome back" in reply and "1 for Personal" in reply
+    assert "_done" not in old and "service_type" not in old   # state wiped, starts clean

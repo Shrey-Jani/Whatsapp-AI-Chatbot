@@ -19,7 +19,11 @@ from .question_flow import (AUTHORIZATION_MSG, CORP_FILING_CHECKLIST, CRA_HELPLI
                             RENT_NO_PROOF_GUIDANCE, REP_AUTH_NO, REP_AUTH_YES, GIG_SUMMARY_GUIDANCE,
                             NEWCOMER_FILE_BENEFITS, RIDESHARE_PLATFORMS, in_quebec)
 
-SESSION_TIMEOUT = 5 * 60   # seconds of inactivity before an unfinished session restarts
+SESSION_TIMEOUT = 5 * 60        # seconds of inactivity before an unfinished session restarts
+# A finished filing is not the end of the relationship - clients come back next tax year.
+# After this gap a message on a completed session starts a new filing instead of repeating
+# the closing line forever. Shorter follow-ups ("thanks", a payment screenshot) still close.
+DONE_TIMEOUT = 24 * 60 * 60     # seconds before a COMPLETED session accepts a new filing
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
 # "Take me back to the previous question" - phrases that undo the last answer.
@@ -591,14 +595,17 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     # arrives after the window, the unfinished session resets and starts fresh. No timers needed.
     now = time.time()
     last = state.get("_last_at")
+    was_done = bool(state.get("_done"))
     state["_last_at"] = now
-    if (user_text is not None and last and now - last > SESSION_TIMEOUT
-            and not state.get("_done") and not state.get("_escalate")):
+    idle_limit = DONE_TIMEOUT if was_done else SESSION_TIMEOUT
+    if (user_text is not None and last and now - last > idle_limit
+            and not state.get("_escalate")):
         state.clear()
         state["_last_at"] = now
         first = get_next_question({})
-        return ("Your session timed out due to inactivity, so let's start fresh.\n\n"
-                + _render(first), False)
+        opener = ("Welcome back! Let's start a new filing.\n\n" if was_done
+                  else "Your session timed out due to inactivity, so let's start fresh.\n\n")
+        return opener + _render(first), False
 
     answers = _answers(state)
     q = get_next_question(answers)
