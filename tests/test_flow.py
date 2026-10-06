@@ -663,3 +663,18 @@ def test_completed_session_accepts_a_new_filing_next_year():
     reply, closed = ce.advance(old, "hello")               # next season -> fresh filing
     assert not closed and "Welcome back" in reply and "1 for Personal" in reply
     assert "_done" not in old and "service_type" not in old   # state wiped, starts clean
+
+
+def test_image_slip_becomes_a_pdf_page():
+    # Clients photograph slips on WhatsApp, so images must fold into the combined client
+    # file alongside the ones sent as real PDFs - otherwise half the attachments are lost.
+    import io
+    from PIL import Image
+    from pypdf import PdfReader
+    from app.pdf_generator import _image_page
+
+    for fmt in ("JPEG", "PNG"):
+        buf = io.BytesIO()
+        Image.new("RGB", (1200, 1600), (240, 240, 240)).save(buf, fmt)
+        page = _image_page(buf.getvalue(), f"T4 2025.{fmt.lower()}")
+        assert len(PdfReader(io.BytesIO(page)).pages) == 1, fmt

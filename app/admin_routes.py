@@ -123,6 +123,18 @@ async def download_pdf(submission_id: int, db: AsyncSession = Depends(get_db)):
                     headers={"Content-Disposition": f'attachment; filename="summary_{submission_id}.pdf"'})
 
 
+@router.get("/submissions/{submission_id}/download-full")
+async def download_full_file(submission_id: int, db: AsyncSession = Depends(get_db)):
+    """Summary + every uploaded slip in one PDF, for staff to keep on their own machine."""
+    sub = await db.get(Submission, submission_id)
+    if sub is None:
+        raise HTTPException(404, "not found")
+    pdf = await pdf_generator.generate_full_file_pdf(db, sub.client_id)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="client_file_{submission_id}.pdf"'})
+
+
 @router.get("/escalations")
 async def escalations(db: AsyncSession = Depends(get_db)):
     rows = (await db.scalars(select(Escalation).where(Escalation.resolved.is_(False))

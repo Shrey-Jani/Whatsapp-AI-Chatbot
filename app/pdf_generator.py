@@ -185,3 +185,61 @@ async def generate_tax_summary_pdf(db, client_id) -> bytes:
     if client.spouse_json and client.spouse_json.get("sin"):
         data["spouse_sin"] = reveal_sin(client.spouse_json["sin"])
     return build_summary_pdf(data, documents, branding, ref)
+
+
+def _image_page(raw: bytes, caption: str) -> bytes:
+    """One page holding an image slip, scaled to fit, captioned with its filename.
+
+    Photos of slips are the common case on WhatsApp - without this they could not be
+    folded into a single PDF alongside the ones clients send as actual PDFs.
+    """
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as _canvas
+
+    buf = io.BytesIO()
+    c = _canvas.Canvas(buf, pagesize=letter)
+    page_w, page_h = letter
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(0.6 * inch, page_h - 0.6 * inch, caption)
+    img = ImageReader(io.BytesIO(raw))
+    iw, ih = img.getSize()
+    scale = min((page_w - 1.2 * inch) / iw, (page_h - 1.6 * inch) / ih)
+    c.drawImage(img, (page_w - iw * scale) / 2, 0.6 * inch, iw * scale, ih * scale,
+                preserveAspectRatio=True, anchor="c")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+async def generate_full_file_pdf(db, client_id) -> bytes:
+    """The summary followed by every slip the client uploaded, as one file.
+
+    Staff work from one document instead of downloading attachments one at a time. A slip
+    that failed to store (empty storage_path) is skipped rather than breaking the download.
+    """
+    from pypdf import PdfReader, PdfWriter
+
+    from . import storage
+
+    writer = PdfWriter()
+    summary = await generate_tax_summary_pdf(db, client_id)
+    for page in PdfReader(io.BytesIO(summary)).pages:
+        writer.add_page(page)
+
+    docs = (await db.scalars(select(Document).where(Document.client_id == client_id)
+                             .order_by(Document.id))).all()
+    for d in docs:
+        if not d.storage_path:
+            continue
+        try:
+            raw = storage.load(d.storage_path)
+            part = (raw if (d.file_type or "").lower() == "application/pdf"
+                    else _image_page(raw, d.filename))
+            for page in PdfReader(io.BytesIO(part)).pages:
+                writer.add_page(page)
+        except Exception as e:                     # one bad slip must not kill the download
+            print(f"[pdf] could not attach {d.filename}: {e}")
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()

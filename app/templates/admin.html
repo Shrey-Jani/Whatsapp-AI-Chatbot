@@ -286,6 +286,7 @@
           <td>
             <button onclick="view(${r.id})">View</button>
             <button onclick="downloadPdf(${r.id})">PDF</button>
+            <button onclick="downloadFull(${r.id})">Full file</button>
           </td>
         </tr>`,
             )
@@ -348,6 +349,25 @@
         a.download = filename || `document_${id}`;
         a.click();
         URL.revokeObjectURL(a.href);
+      }
+
+      async function downloadFull(id, btn) {
+        // Summary + every uploaded slip. Larger than the summary, so show progress.
+        const el = event && event.target;
+        const label = el ? el.textContent : null;
+        if (el) { el.textContent = "Building…"; el.disabled = true; }
+        try {
+          const r = await api(`/api/admin/submissions/${id}/download-full`);
+          if (!r.ok) { alert("Could not build the file."); return; }
+          const blob = await r.blob();
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = `client_file_${id}.pdf`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } finally {
+          if (el) { el.textContent = label; el.disabled = false; }
+        }
       }
 
       async function downloadPdf(id) {
