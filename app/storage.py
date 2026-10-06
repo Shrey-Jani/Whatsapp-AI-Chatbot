@@ -1,4 +1,4 @@
-"""File storage - local disk (default) or Cloudflare R2, chosen by STORAGE_BACKEND.
+"""File storage - local disk (default) or any S3-compatible store, chosen by STORAGE_BACKEND.
 
 Same interface for both backends:
     upload(tenant_id, path, data, content_type) -> key
@@ -7,9 +7,10 @@ Same interface for both backends:
 
 local  - zero setup, but needs a persistent disk (VPS / mounted volume). On ephemeral
          hosts (Render/Railway free) the disk is wiped on restart.
-r2     - Cloudflare R2 object storage, survives anywhere. Set STORAGE_BACKEND=r2 and the
-         R2_* keys. Files are served only through the authenticated admin API, never a
-         public URL.
+r2     - any S3-compatible object store, survives anywhere. Set STORAGE_BACKEND=r2 plus the
+         R2_* credentials; add STORAGE_ENDPOINT_URL + STORAGE_REGION to target something
+         other than Cloudflare R2 (Supabase Storage, MinIO...). Files are served only
+         through the authenticated admin API, never a public URL.
 """
 from pathlib import Path
 
@@ -42,7 +43,7 @@ def _local_exists(key: str) -> bool:
     return bool(key) and (_root() / key).is_file()
 
 
-# ---- Cloudflare R2 (S3-compatible via boto3) ----
+# ---- S3-compatible object storage via boto3 (R2, Supabase Storage, ...) ----
 _r2 = None
 
 
@@ -52,10 +53,12 @@ def _client():
         import boto3  # lazy - only needed when STORAGE_BACKEND=r2
         _r2 = boto3.client(
             "s3",
-            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            # STORAGE_ENDPOINT_URL points at any S3-compatible store; falls back to R2.
+            endpoint_url=(settings.storage_endpoint_url
+                          or f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"),
             aws_access_key_id=settings.r2_access_key_id,
             aws_secret_access_key=settings.r2_secret_access_key,
-            region_name="auto",
+            region_name=settings.storage_region,
         )
     return _r2
 

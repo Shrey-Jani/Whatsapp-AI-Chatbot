@@ -17,10 +17,14 @@ class Settings(BaseSettings):
     # Supabase - Postgres only (files go to local disk or R2, see storage_backend)
     database_url: str = "postgresql+asyncpg://user:pass@host:5432/postgres"
 
-    # File storage: "local" (disk, needs a persistent volume) or "r2" (Cloudflare R2).
+    # File storage: "local" (disk, needs a persistent volume) or "r2" (any S3-compatible
+    # store - Cloudflare R2, Supabase Storage, MinIO...). The R2_* names are historical;
+    # they hold the credentials whichever provider you point STORAGE_ENDPOINT_URL at.
     storage_backend: str = "local"          # local | r2
     storage_dir: str = "uploaded_files"     # local backend: where slips are written
-    r2_account_id: str = ""                 # r2 backend: from the Cloudflare dashboard
+    storage_endpoint_url: str = ""          # e.g. https://<ref>.supabase.co/storage/v1/s3
+    storage_region: str = "auto"            # R2 wants "auto"; Supabase wants its real region
+    r2_account_id: str = ""                 # only used to build the default R2 endpoint
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket: str = "taxbot-docs"
