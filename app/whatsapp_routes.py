@@ -3,12 +3,13 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from sqlalchemy import select
 
-from . import chat_engine, documents, pdf_generator, submission
+from . import chat_engine, checklists, documents, pdf_generator, submission
 from .admin_routes import RESET_KEY, issue_reset_code
 from .config import settings
 from .database import Session
 from .models import ChatSession, Escalation, Setting, Tenant
-from .whatsapp import download_media, send_document, send_text, upload_media, verify_signature
+from .whatsapp import (download_media, send_document, send_image, send_text, upload_media,
+                       verify_signature)
 
 log = logging.getLogger("taxbot")
 router = APIRouter()

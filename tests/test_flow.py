@@ -737,3 +737,13 @@ def test_uploaded_filename_cannot_escape_the_client_folder():
     assert _safe_name("") == "upload"
     assert _safe_name("   ") == "upload"
     assert _safe_name("T4 2025.pdf") == "T4 2025.pdf"          # ordinary names untouched
+
+
+def test_whatsapp_routes_has_every_name_it_uses():
+    # The checklist-card loop sits inside try/except, so a missing import raised NameError on
+    # every card and was swallowed as a log warning - the images silently never arrived.
+    # Names used there must exist at module level.
+    import app.whatsapp_routes as wr
+    for name in ("checklists", "send_image", "upload_media", "send_text", "send_document"):
+        assert hasattr(wr, name), f"whatsapp_routes uses {name} but never imports it"
+    assert callable(wr.checklists.load) and wr.checklists.names_for("Corporate Tax")
