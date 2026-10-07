@@ -161,11 +161,20 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
         state["_escalate_logged"] = True
         op = _operator(tenant)
         if op:
+            # Staff call the client back, so the alert must carry enough to dial without
+            # opening the dashboard: who, what number, and what they were doing.
+            name = state.get("full_name") or state.get("corporation_name") or "Name not given yet"
+            service = state.get("service_type") or "not chosen yet"
             try:
                 await send_text(tenant, op,
-                                f"⚠️ Escalation ({state.get('_escalate_reason')}) from {sess.wa_number}")
+                                "📞 Client asked to speak with staff\n\n"
+                                f"Name: {name}\n"
+                                f"Phone: +{sess.wa_number}\n"
+                                f"Service: {service}\n"
+                                f"Reason: {state.get('_escalate_reason')}\n\n"
+                                "Please call them back during business hours.")
             except Exception as e:
-                print(f"[whatsapp] escalation notify failed: {e}")
+                log.warning("escalation notify failed: %s", e)
 
     if done and state.get("_done") and state.get("_escalate"):   # handed off to staff (e.g. Quebec) - not a filing
         pass                                                     # escalation already logged above

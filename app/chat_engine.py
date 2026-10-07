@@ -25,6 +25,14 @@ SESSION_TIMEOUT = 5 * 60        # seconds of inactivity before an unfinished ses
 # the closing line forever. Shorter follow-ups ("thanks", a payment screenshot) still close.
 DONE_TIMEOUT = 24 * 60 * 60     # seconds before a COMPLETED session accepts a new filing
 ESCALATE_WORDS = {"agent", "staff", "human", "representative", "help", "support"}
+# Whole phrases too: on WhatsApp there is no button, so clients type what we told them to -
+# "speak with staff" - which the exact-match set above would miss and feed to the current
+# question as an answer. Matched as substrings, so "I want to speak to someone" works.
+ESCALATE_PHRASES = ("speak with staff", "speak to staff", "speak with team", "speak to team",
+                    "speak with a staff", "talk to staff", "talk to team", "speak to someone",
+                    "talk to someone", "speak to a person", "talk to a person", "real person",
+                    "speak to a human", "talk to a human", "speak with agent", "talk to agent",
+                    "call me", "give me a call", "phone me", "contact me")
 MAX_ERRORS = 3   # repeated validation failures on one question → auto-handoff to staff
 # "Take me back to the previous question" - phrases that undo the last answer.
 GO_BACK_PHRASES = ("go back", "wrong choice", "wrong answer", "wrong option", "previous question",
@@ -141,7 +149,17 @@ BENEFITS_INFO = (
     "eligible for and claim all applicable ones on your tax return.")
 # ponytail: per-tenant prices + the generated Information Sheet PDF attach here in Phase 5.
 CLOSING_MSG = "Thank you, Have a nice day."
-ESCALATE_MSG = "Connecting you with our staff - someone will follow up with you shortly."
+# Client asked for a person. Per the client: staff phone them back rather than chatting here.
+ESCALATE_MSG = ("Thank you - our team will call you on this number shortly, during business "
+                "hours.")
+# Asked on every message after that, so a waiting client is never stuck repeating themselves.
+STAFF_FOLLOWUP = ("Our team will call you shortly during business hours.\n\n"
+                  "If you'd like to carry on here in the meantime, reply CONTINUE. "
+                  "If you've already given our team everything they need, reply DONE.")
+STAFF_HANDLED_MSG = ("Thank you - our team will take it from here. If you need anything else, "
+                     "just message us.")
+RESUME_WORDS = ("continue", "carry on", "resume", "keep going")
+HANDLED_WORDS = ("done", "all done", "finished", "handled", "sorted", "completed")
 # Quebec residence detected. We don't file Quebec provincial returns, but a prior year (when the
 # client lived elsewhere) may still be fileable - so we hand off to staff instead of ending cold.
 QUEBEC_NOTICE = (
@@ -547,8 +565,8 @@ CHECKLIST_ONLY = ("Corporate Tax", "GST/HST", "Business Registration")
 CHECKLIST_HANDOFF = (
     "Here is the checklist. Please go through it and share your information and payment e-Transfer "
     "screenshot right here in this chat, or by email to {email} - whichever is easier for you. "
-    "If you have any questions, press 'Speak with Staff'. Our team will review what you send and "
-    "get back to you shortly. Thank you.")
+    "If you have any questions, reply STAFF and our team will call you back. We'll review what "
+    "you send and get back to you shortly. Thank you.")
 SHARED_INFO_ACK = ("Thank you - we've received this and passed it to our team. You can keep sending "
                    "anything else here, and someone will get back to you shortly.")
 
@@ -623,15 +641,21 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
 
     low = user_text.strip().lower()
 
-    if state.get("_escalate"):                # already handed off to staff
-        if any(p in low for p in GO_BACK_PHRASES) and q is not None:   # clicked staff by mistake -> resume
+    if state.get("_escalate"):                # waiting for a call back from staff
+        resuming = low in RESUME_WORDS or any(p in low for p in GO_BACK_PHRASES)
+        if resuming and q is not None:        # carry on here while they wait, or clicked by mistake
             for k in ("_escalate", "_escalate_reason", "_escalate_logged", "_done"):
                 state.pop(k, None)            # clear _done too - the flow is no longer finished
             resume = i18n.localize("No problem - let's continue where we left off.", lang)
             return f"{resume}\n\n{_render(q, lang, answers)}", False
-        return i18n.localize(ESCALATE_MSG, lang), True
+        if low in HANDLED_WORDS:              # staff took the details on the phone
+            for k in ("_escalate", "_escalate_reason", "_escalate_logged"):
+                state.pop(k, None)
+            state["_done"] = True
+            return i18n.localize(STAFF_HANDLED_MSG, lang), True
+        return i18n.localize(STAFF_FOLLOWUP, lang), True
 
-    if low in ESCALATE_WORDS:
+    if low in ESCALATE_WORDS or any(p in low for p in ESCALATE_PHRASES):
         state["_escalate"] = True
         state["_escalate_reason"] = "customer requested staff"
         return i18n.localize(ESCALATE_MSG, lang), True

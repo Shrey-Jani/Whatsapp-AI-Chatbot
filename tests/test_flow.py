@@ -499,7 +499,7 @@ def test_manual_escalation():
     state = {"service_type": "Personal or Individual Tax"}
     reply, done = ce.advance(state, "agent")
     assert done and state.get("_escalate")
-    assert "staff" in reply.lower()
+    assert "call you" in reply.lower()        # staff phone back; they don't chat here
 
 
 def test_repeated_errors_auto_escalate(monkeypatch):
@@ -620,7 +620,7 @@ def test_service_checklist_cards(monkeypatch):
             assert "Service & Filing Policy" not in reply and "Initial payment: $45" not in reply
             assert "Rep ID: 64HN5M7" not in reply
         else:
-            assert "Speak with Staff" in reply and "Thank you" in reply, svc
+            assert "reply STAFF" in reply and "Thank you" in reply, svc   # no button on WhatsApp
 
 
 def test_admin_password_hashing():
@@ -678,3 +678,48 @@ def test_image_slip_becomes_a_pdf_page():
         Image.new("RGB", (1200, 1600), (240, 240, 240)).save(buf, fmt)
         page = _image_page(buf.getvalue(), f"T4 2025.{fmt.lower()}")
         assert len(PdfReader(io.BytesIO(page)).pages) == 1, fmt
+
+
+def test_speak_with_staff_promises_a_call_and_lets_the_client_carry_on():
+    # Client asks for a person -> told they'll be called. Afterwards they can either continue
+    # in chat while they wait, or say they're done because staff took it on the phone.
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    seed = {"service_type": "Personal or Individual Tax", "full_name": "A B",
+            "phone": "4160001234", "email": "a@b.com", "sin": "046454286",
+            "sin_document": "skip", "dob": "01/01/1990"}
+
+    s = dict(seed)
+    reply, _ = ce.advance(s, "staff")
+    assert "call you" in reply.lower() and s.get("_escalate") is True
+    assert "_done" not in s                       # a call-back is not a finished filing
+
+    again, _ = ce.advance(s, "ok")                # still waiting -> offered both ways out
+    assert "CONTINUE" in again and "DONE" in again
+
+    carry = dict(s)
+    reply, closed = ce.advance(carry, "continue")  # carry on here meanwhile
+    assert not closed and carry.get("_escalate") is None and "address" in reply.lower()
+
+    reply, closed = ce.advance(s, "done")          # staff took the details by phone
+    assert closed and s.get("_escalate") is None and s.get("_done") is True
+
+
+def test_typed_staff_requests_escalate():
+    # WhatsApp has no button, so clients type the phrase we tell them to. Exact-match words
+    # alone missed those and fed them to the current question as an answer.
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    seed = {"service_type": "Personal or Individual Tax", "full_name": "A B",
+            "phone": "4160001234", "email": "a@b.com", "sin": "046454286",
+            "sin_document": "skip", "dob": "01/01/1990"}
+    for text in ("staff", "Speak with Staff", "i want to speak to someone",
+                 "can you call me please", "talk to a human"):
+        s = dict(seed)
+        reply, _ = ce.advance(s, text)
+        assert s.get("_escalate") is True, text
+        assert "call you" in reply.lower(), text
+    # a normal answer must NOT escalate
+    s = dict(seed)
+    ce.advance(s, "70 Absolute Ave, Mississauga ON L4Z 0A4")
+    assert s.get("_escalate") is None and s.get("address")
