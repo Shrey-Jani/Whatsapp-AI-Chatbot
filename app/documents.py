@@ -5,6 +5,8 @@ primary reader (accurate on real slip layouts); pdfplumber is a cheap fallback f
 when vision can't identify the slip. Full parsed data is saved to the Document for the firm;
 the user only sees a short "<slip> received." confirmation.
 """
+from pathlib import Path
+
 from . import llm, ocr, pdf_parser, storage, submission
 from .config import settings
 from .models import Document
@@ -47,8 +49,21 @@ def _parse(data: bytes, content_type: str, kind: str) -> dict:
     return meta
 
 
+def _safe_name(filename: str) -> str:
+    """Strip directory parts from a sender-controlled filename.
+
+    WhatsApp passes the sender's own filename straight through, and it lands in a storage
+    path and a Content-Disposition header. "../../app/main.py" would otherwise escape the
+    client's folder; quotes and newlines would break the download header.
+    """
+    name = Path(filename or "").name.replace("\\", "").replace('"', "").strip()
+    name = "".join(c for c in name if c.isprintable())
+    return name or "upload"
+
+
 def handle_file_upload(db, tenant, sess, data: bytes, filename: str, content_type: str) -> str:
     """Returns the message to send back to the user. Caller commits the session."""
+    filename = _safe_name(filename)
     if len(data) > MAX_BYTES:
         return "That file is over 5 MB - please upload a smaller one."
     kind = ALLOWED.get((content_type or "").lower())

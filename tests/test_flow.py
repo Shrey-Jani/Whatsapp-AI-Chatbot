@@ -723,3 +723,17 @@ def test_typed_staff_requests_escalate():
     s = dict(seed)
     ce.advance(s, "70 Absolute Ave, Mississauga ON L4Z 0A4")
     assert s.get("_escalate") is None and s.get("address")
+
+
+def test_uploaded_filename_cannot_escape_the_client_folder():
+    # WhatsApp hands us the sender's own filename; it reaches a storage path and a download
+    # header, so directory parts, quotes and control characters must not survive.
+    from app.documents import _safe_name
+    assert _safe_name("../../app/main.py") == "main.py"
+    assert _safe_name("/etc/passwd") == "passwd"
+    assert _safe_name('T4"; x.pdf') == "T4; x.pdf"               # quote stripped, rest kept
+    assert "\n" not in _safe_name("a\nb.pdf")                    # control characters dropped
+    assert '"' not in _safe_name('bad"name.pdf')
+    assert _safe_name("") == "upload"
+    assert _safe_name("   ") == "upload"
+    assert _safe_name("T4 2025.pdf") == "T4 2025.pdf"          # ordinary names untouched

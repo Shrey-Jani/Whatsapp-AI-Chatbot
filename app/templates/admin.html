@@ -130,7 +130,16 @@
     </div>
 
     <script>
-      let KEY = sessionStorage.getItem("adminKey") || "";
+      // Client-supplied text (names, filenames, answers) is rendered with innerHTML below, so
+    // every interpolation must be escaped - otherwise a client whose "name" is a script tag
+    // runs code in a staff browser that holds the admin key.
+    const esc = (v) =>
+      String(v ?? "-").replace(
+        /[&<>"']/g,
+        (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+      );
+
+    let KEY = sessionStorage.getItem("adminKey") || "";
       let ROWS = [];
       const STATUSES = ["pending", "in_review", "completed"];
 
@@ -250,7 +259,7 @@
           rows
             .map(
               (e) =>
-                `<tr><td>${e.reason}</td><td>${e.session_id}</td>` +
+                `<tr><td>${esc(e.reason)}</td><td>${esc(e.session_id)}</td>` +
                 `<td>${(e.created_at || "").slice(0, 16).replace("T", " ")}</td>` +
                 `<td><button onclick="resolveEsc(${e.id})">Resolve &amp; resume</button></td></tr>`,
             )
@@ -275,8 +284,8 @@
             .map(
               (r) => `
         <tr>
-          <td>${r.client_name ?? "-"}</td>
-          <td>${r.phone ?? "-"}</td>
+          <td>${esc(r.client_name)}</td>
+          <td>${esc(r.phone)}</td>
           <td>${(r.date || "").slice(0, 10)}</td>
           <td>
             <select onchange="updateStatus(${r.id}, this.value)">
@@ -311,18 +320,18 @@
           Object.entries(o)
             .map(
               ([k, v]) =>
-                `<tr><th>${k.replace(/_/g, " ")}</th><td>${v ?? "-"}</td></tr>`,
+                `<tr><th>${esc(k.replace(/_/g, " "))}</th><td>${esc(v)}</td></tr>`,
             )
             .join("");
         const docs = d.documents.length
           ? `<table>${d.documents
               .map(
                 (x) =>
-                  `<tr><td>${x.slip_type ?? "-"}</td><td>${x.employer ?? "-"}</td>` +
+                  `<tr><td>${esc(x.slip_type)}</td><td>${esc(x.employer)}</td>` +
                   `<td>${
                     x.has_file
-                      ? `<a href="#" onclick="downloadDoc(${x.id},'${x.filename}');return false;">${x.filename}</a>`
-                      : x.filename
+                      ? `<a href="#" class="doclink" data-id="${esc(x.id)}" data-name="${esc(x.filename)}">${esc(x.filename)}</a>`
+                      : esc(x.filename)
                   }</td></tr>`,
               )
               .join("")}</table>`
@@ -330,12 +339,21 @@
         document.getElementById("modalBody").innerHTML =
           `<h2>Client Details</h2><table>${kv(d.client)}</table>
          <h3>Documents (click a filename to download)</h3>${docs}
-         <h3>Notes</h3><p>${d.admin_notes ?? "-"}</p>`;
+         <h3>Notes</h3><p>${esc(d.admin_notes)}</p>`;
         document.getElementById("modal").hidden = false;
       }
       function closeModal() {
         document.getElementById("modal").hidden = true;
       }
+
+      // Delegated, because the filename now lives in a data attribute rather than an
+      // inline onclick - an apostrophe in a filename used to break out of that JS string.
+      document.getElementById("modalBody").addEventListener("click", (ev) => {
+        const a = ev.target.closest("a.doclink");
+        if (!a) return;
+        ev.preventDefault();
+        downloadDoc(a.dataset.id, a.dataset.name);
+      });
 
       async function downloadDoc(id, filename) {
         const r = await api(`/api/admin/documents/${id}/download`);
