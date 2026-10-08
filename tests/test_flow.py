@@ -747,3 +747,35 @@ def test_whatsapp_routes_has_every_name_it_uses():
     for name in ("checklists", "send_image", "upload_media", "send_text", "send_document"):
         assert hasattr(wr, name), f"whatsapp_routes uses {name} but never imports it"
     assert callable(wr.checklists.load) and wr.checklists.names_for("Corporate Tax")
+
+
+def test_finished_client_can_restart_with_a_greeting():
+    # Ravi tested option 2, which finishes at once; every later "Hi" was filed as "details
+    # shared" and he never saw the menu again - so never the checklist images. A finished
+    # session must restart on a greeting or "menu", but never on a real message, and never
+    # for a client waiting on a staff call.
+    import time
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+
+    def finished():
+        return {"service_type": "Corporate Tax", "_done": True, "_last_at": time.time()}
+
+    for text in ("Hi", "hey", "Hello!", "menu", "Back", "start over"):
+        s = finished()
+        reply, closed = ce.advance(s, text)
+        assert not closed and "1 for Personal" in reply, text
+        assert "service_type" not in s and "_done" not in s, text   # truly a fresh session
+
+    s = finished()                                   # a real message is still just kept
+    reply, _ = ce.advance(s, "Acme Ltd, director John Smith")
+    assert "received" in reply.lower() and s["shared_info"] == ["Acme Ltd, director John Smith"]
+
+    s = dict(finished(), _escalate=True, _escalate_reason="customer requested staff")
+    reply, _ = ce.advance(s, "hi")                   # waiting on a call: no fresh menu
+    assert "call you" in reply.lower() and s.get("_escalate") is True
+
+    mid = {"service_type": "Personal or Individual Tax", "full_name": "A B", "phone": "4160001234",
+           "_history": ["full_name", "phone"], "_last_at": time.time()}
+    ce.advance(mid, "back")                          # mid-flow, plain "back" undoes an answer
+    assert "phone" not in mid

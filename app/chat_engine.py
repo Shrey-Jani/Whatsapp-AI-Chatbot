@@ -159,6 +159,13 @@ STAFF_FOLLOWUP = ("Our team will call you shortly during business hours.\n\n"
 STAFF_HANDLED_MSG = ("Thank you - our team will take it from here. If you need anything else, "
                      "just message us.")
 RESUME_WORDS = ("continue", "carry on", "resume", "keep going")
+# A client whose filing is finished (or who only picked a checklist option, which finishes at
+# once) types "hi" or "menu" expecting the menu. Without this every message was filed as
+# "details shared" and acknowledged, and the menu - and so the checklist images, which are
+# only sent when a service is picked - never came back. Whole-message match only, so a real
+# answer or document note is never mistaken for a restart.
+RESTART_WORDS = ("hi", "hii", "hello", "hey", "menu", "main menu", "start", "restart",
+                 "start over", "begin", "new", "new filing", "back")
 HANDLED_WORDS = ("done", "all done", "finished", "handled", "sorted", "completed")
 # Quebec residence detected. We don't file Quebec provincial returns, but a prior year (when the
 # client lived elsewhere) may still be fileable - so we hand off to staff instead of ending cold.
@@ -640,6 +647,13 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     lang = state.get("_lang", i18n.DEFAULT)
 
     low = user_text.strip().lower()
+    word = low.rstrip("!.?, ")                # "Hi!" / "hello." still count as the word
+
+    if state.get("_done") and not state.get("_escalate") and word in RESTART_WORDS:
+        state.clear()
+        state["_last_at"] = now
+        return (i18n.localize("Welcome back! Let's start a new filing.", lang)
+                + "\n\n" + _render(get_next_question({})), False)
 
     if state.get("_escalate"):                # waiting for a call back from staff
         resuming = low in RESUME_WORDS or any(p in low for p in GO_BACK_PHRASES)
@@ -659,7 +673,7 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
         state["_escalate"] = True
         state["_escalate_reason"] = "customer requested staff"
         return i18n.localize(ESCALATE_MSG, lang), True
-    if any(p in low for p in GO_BACK_PHRASES):   # undo the previous answer and re-ask it
+    if word == "back" or any(p in low for p in GO_BACK_PHRASES):   # undo the previous answer
         history = state.get("_history") or []
         if history:
             state.pop(history.pop(), None)       # remove the last answer → it becomes current again
