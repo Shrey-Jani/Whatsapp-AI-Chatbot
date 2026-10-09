@@ -50,7 +50,38 @@ async def _handle(payload: dict):
                     await _process(pnid, msg)
                 except Exception:
                     # One bad message must not sink the rest of the webhook batch.
-                    log.exception("WhatsApp message processing failed (from %s)", msg.get("from"))
+                    log.exception("WhatsApp message processing failed (from %s)", _sender(msg))
+
+
+def _sender(msg: dict) -> str | None:
+    """Phone number if Meta sent one, else the business-scoped user ID.
+
+    Meta omits "from" when the sender has enabled a WhatsApp username and we haven't
+    exchanged messages with their number in the last 30 days. Reading msg["from"] directly
+    crashed on those clients and they got no reply at all.
+    """
+    return msg.get("from") or msg.get("from_user_id")
+
+
+def _who(sender: str) -> str:
+    """How to show a sender to staff: a dialable number, or an honest 'hidden'."""
+    return f"+{sender}" if str(sender).isdigit() else "hidden (client uses a WhatsApp username)"
+
+
+def _phone_for_staff(wa_number: str, state: dict) -> str:
+    """The best dialable number for an alert, and an honest note when there isn't one yet.
+
+    Visible number: use it. Hidden (WhatsApp username): fall back to the number the client
+    typed in the questions, or the one we asked for when they requested staff.
+    """
+    if str(wa_number).isdigit():
+        return f"+{wa_number}"
+    given = state.get("callback_phone") or state.get("phone")
+    if given:
+        return f"{given} (given by the client)"
+    if state.get("callback_declined"):
+        return "not shared - the client chose not to give a number"
+    return "not available (client uses a WhatsApp username)"
 
 
 def _operator(tenant) -> str | None:
@@ -58,7 +89,10 @@ def _operator(tenant) -> str | None:
 
 
 async def _process(phone_number_id: str, msg: dict):
-    wa_number = msg["from"]
+    wa_number = _sender(msg)
+    if not wa_number:                                  # neither a phone nor a user ID: can't reply
+        log.warning("inbound WhatsApp message with no sender identifier, keys=%s", sorted(msg))
+        return
     async with Session() as db:
         tenant = (await db.scalars(
             select(Tenant).where(Tenant.phone_number_id == phone_number_id))).first()
@@ -133,7 +167,7 @@ async def _save_media(db, tenant, sess, msg, mtype) -> str:
     if op:
         try:
             mid = await upload_media(tenant, data, mime, filename)
-            await send_document(tenant, op, mid, filename, caption=f"Slip from {sess.wa_number}")
+            await send_document(tenant, op, mid, filename, caption=f"Slip from {_who(sess.wa_number)}")
         except Exception as e:
             print(f"[whatsapp] slip forward failed: {e}")
     return reply
@@ -141,6 +175,7 @@ async def _save_media(db, tenant, sess, msg, mtype) -> str:
 
 async def _advance_text(db, tenant, sess, first_touch, text) -> str:
     state = dict(sess.conversation_state_json or {})
+    state["_phone_hidden"] = not str(sess.wa_number).isdigit()   # username user: no number from Meta
     reply, done = (chat_engine.advance(state, None, greeting=text) if first_touch
                    else chat_engine.advance(state, text))
 
@@ -155,7 +190,10 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
         reply, done = chat_engine.advance(state, None)
         reply = "No problem - let's update your details.\n\n" + reply
 
-    if state.get("_escalate") and not state.get("_escalate_logged"):
+    # A hidden-number client who asked for staff is first asked for a number; the alert goes out
+    # once, with it, rather than as a "no number yet" alert followed by a second one.
+    if (state.get("_escalate") and not state.get("_escalate_logged")
+            and not state.get("_need_callback")):
         db.add(Escalation(tenant_id=tenant.id, session_id=sess.id,
                           reason=state.get("_escalate_reason", "escalation"),
                           context_json={k: v for k, v in state.items() if not k.startswith("_") and k not in ("sin", "spouse_sin")}))
@@ -170,7 +208,7 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
                 await send_text(tenant, op,
                                 "📞 Client asked to speak with staff\n\n"
                                 f"Name: {name}\n"
-                                f"Phone: +{sess.wa_number}\n"
+                                f"Phone: {_phone_for_staff(sess.wa_number, state)}\n"
                                 f"Service: {service}\n"
                                 f"Reason: {state.get('_escalate_reason')}\n\n"
                                 "Please call them back during business hours.")
@@ -194,7 +232,7 @@ async def _advance_text(db, tenant, sess, first_touch, text) -> str:
         if op:
             try:
                 await send_text(tenant, op, f"📄 {state.get('service_type')} details from "
-                                            f"{sess.wa_number}:\n\n{state['shared_info'][-1]}")
+                                            f"{_who(sess.wa_number)}:\n\n{state['shared_info'][-1]}")
             except Exception as e:
                 log.warning("shared-info forward failed: %s", e)
     # Only Personal Tax is a real filing; Corporate/GST/Business Reg are checklist-only.

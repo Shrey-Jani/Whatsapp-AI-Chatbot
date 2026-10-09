@@ -779,3 +779,67 @@ def test_finished_client_can_restart_with_a_greeting():
            "_history": ["full_name", "phone"], "_last_at": time.time()}
     ce.advance(mid, "back")                          # mid-flow, plain "back" undoes an answer
     assert "phone" not in mid
+
+
+def test_senders_who_hide_their_phone_number_still_get_a_reply():
+    # Ravi's second phone had a WhatsApp username enabled. Meta then omits "from" and sends a
+    # from_user_id instead; msg["from"] raised KeyError, so he got no reply and no session -
+    # delivered ticks on his phone, silence from the bot. Any such client would hit it.
+    from app.whatsapp import addressee
+    from app.whatsapp_routes import _sender, _who
+
+    assert _sender({"from": "16474021615", "from_user_id": "CA.123"}) == "16474021615"
+    assert _sender({"from_user_id": "CA.13491208655302741918"}) == "CA.13491208655302741918"
+    assert _sender({"type": "text"}) is None
+
+    assert addressee("16474021615") == {"to": "16474021615"}          # a phone number
+    bsuid = addressee("CA.13491208655302741918")                       # a user ID
+    assert bsuid == {"recipient_type": "individual", "recipient": "CA.13491208655302741918"}
+    assert "to" not in bsuid                  # Meta: omit "to" when addressing by user ID
+
+    assert _who("16474021615") == "+16474021615"
+    assert "hidden" in _who("CA.13491208655302741918") and "CA." not in _who("CA.13491208655302741918")
+
+
+def test_hidden_number_client_is_asked_for_a_number_when_they_want_staff():
+    # A WhatsApp-username client's phone is withheld by Meta, so "speak with staff" would give
+    # staff nothing to dial. Ask once - but only when we don't already have a number.
+    import app.llm as llm; llm.configured = lambda: False
+    import app.chat_engine as ce
+    base = {"service_type": "Personal or Individual Tax"}
+
+    s = dict(base, _phone_hidden=True)                     # hidden, no number yet -> ask
+    reply, _ = ce.advance(s, "speak with staff")
+    assert "phone number" in reply.lower() and s["_need_callback"] is True
+    assert "won't be able to contact you" in reply.lower()   # says plainly what skipping costs
+
+    reply, _ = ce.advance(s, "call me tomorrow")            # not a number -> asked again
+    assert "area code" in reply.lower() and s.get("_need_callback") is True
+
+    reply, closed = ce.advance(s, "(416) 555-0123")         # a real number -> kept, staff told
+    assert closed and s["callback_phone"] == "4165550123"
+    assert s.get("_need_callback") is None and s.get("_escalate") is True
+    assert "call you on that number" in reply.lower()
+
+    s = dict(base, _phone_hidden=True)                      # SKIP gives up without looping
+    ce.advance(s, "staff"); reply, _ = ce.advance(s, "skip")
+    assert s.get("_need_callback") is None and "change your mind" in reply.lower()
+    assert s.get("callback_declined") is True and s.get("_escalate") is True   # still escalated
+
+    s = dict(base, _phone_hidden=True)                      # CONTINUE drops the question
+    ce.advance(s, "staff"); ce.advance(s, "continue")
+    assert s.get("_need_callback") is None and s.get("_escalate") is None
+
+    for known in (dict(base, _phone_hidden=True, phone="4165550123"),   # gave it in the questions
+                  dict(base, _phone_hidden=False)):                     # Meta showed us the number
+        reply, _ = ce.advance(known, "staff")
+        assert "call you" in reply.lower() and not known.get("_need_callback")
+
+
+def test_staff_alert_uses_the_best_dialable_number():
+    from app.whatsapp_routes import _phone_for_staff
+    assert _phone_for_staff("16474021615", {}) == "+16474021615"
+    assert "4165550123" in _phone_for_staff("CA.123", {"callback_phone": "4165550123"})
+    assert "4165550123" in _phone_for_staff("CA.123", {"phone": "4165550123"})
+    assert "WhatsApp username" in _phone_for_staff("CA.123", {})
+    assert "chose not to" in _phone_for_staff("CA.123", {"callback_declined": True})

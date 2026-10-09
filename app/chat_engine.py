@@ -158,6 +158,18 @@ STAFF_FOLLOWUP = ("Our team will call you shortly during business hours.\n\n"
                   "If you've already given our team everything they need, reply DONE.")
 STAFF_HANDLED_MSG = ("Thank you - our team will take it from here. If you need anything else, "
                      "just message us.")
+# Hidden-number clients (WhatsApp username): Meta withholds their phone, so staff would have
+# nothing to dial. If we also don't have the number they gave in the questions, ask once.
+ESCALATE_ASK_NUMBER = ("Thank you - our team will call you during business hours.\n\n"
+                       "Please send us the best phone number to reach you on. Without a number "
+                       "we won't be able to contact you.")
+CALLBACK_THANKS = ("Thanks - our team will call you on that number during business hours.\n\n"
+                   "If you'd like to carry on here in the meantime, reply CONTINUE.")
+CALLBACK_RETRY = ("Sorry, I couldn't read a phone number there. Please send it with the area code "
+                  "(for example 416 555 0123), or reply SKIP.")
+CALLBACK_SKIPPED = ("Understood. Our team has been told you asked for them, but without a number "
+                    "we won't be able to contact you. If you change your mind, just send us your "
+                    "number any time.")
 RESUME_WORDS = ("continue", "carry on", "resume", "keep going")
 # A client whose filing is finished (or who only picked a checklist option, which finishes at
 # once) types "hi" or "menu" expecting the menu. Without this every message was filed as
@@ -658,20 +670,35 @@ def advance(state: dict, user_text: str | None, greeting: str | None = None) -> 
     if state.get("_escalate"):                # waiting for a call back from staff
         resuming = low in RESUME_WORDS or any(p in low for p in GO_BACK_PHRASES)
         if resuming and q is not None:        # carry on here while they wait, or clicked by mistake
-            for k in ("_escalate", "_escalate_reason", "_escalate_logged", "_done"):
+            for k in ("_escalate", "_escalate_reason", "_escalate_logged", "_done", "_need_callback"):
                 state.pop(k, None)            # clear _done too - the flow is no longer finished
             resume = i18n.localize("No problem - let's continue where we left off.", lang)
             return f"{resume}\n\n{_render(q, lang, answers)}", False
         if low in HANDLED_WORDS:              # staff took the details on the phone
-            for k in ("_escalate", "_escalate_reason", "_escalate_logged"):
+            for k in ("_escalate", "_escalate_reason", "_escalate_logged", "_need_callback"):
                 state.pop(k, None)
             state["_done"] = True
             return i18n.localize(STAFF_HANDLED_MSG, lang), True
+        if state.get("_need_callback"):       # we asked for a number; this should be it
+            if low in ("skip", "no", "no thanks"):
+                state.pop("_need_callback", None)
+                state["callback_declined"] = True      # staff are still alerted, just told why
+                return i18n.localize(CALLBACK_SKIPPED, lang), True
+            digits = re.sub(r"\D", "", user_text)
+            if 10 <= len(digits) <= 15:
+                state["callback_phone"] = digits
+                state.pop("_need_callback", None)    # the route alerts staff now it has a number
+                return i18n.localize(CALLBACK_THANKS, lang), True
+            return i18n.localize(CALLBACK_RETRY, lang), True
         return i18n.localize(STAFF_FOLLOWUP, lang), True
 
     if low in ESCALATE_WORDS or any(p in low for p in ESCALATE_PHRASES):
         state["_escalate"] = True
         state["_escalate_reason"] = "customer requested staff"
+        if (state.get("_phone_hidden") and not state.get("phone")
+                and not state.get("callback_phone")):          # nothing for staff to dial
+            state["_need_callback"] = True
+            return i18n.localize(ESCALATE_ASK_NUMBER, lang), True
         return i18n.localize(ESCALATE_MSG, lang), True
     if word == "back" or any(p in low for p in GO_BACK_PHRASES):   # undo the previous answer
         history = state.get("_history") or []

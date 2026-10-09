@@ -17,9 +17,21 @@ def verify_signature(raw_body: bytes, header: str | None) -> bool:
     return hmac.compare_digest(expected, header.removeprefix("sha256="))
 
 
+def addressee(to: str) -> dict:
+    """Who a message goes to: a phone number, or a business-scoped user ID.
+
+    WhatsApp lets people hide their number behind a username. Webhooks then carry a
+    from_user_id like "US.13491208655302741918" and no phone, and Meta wants the reply sent
+    to "recipient" instead of "to". Phone numbers are digits only; a BSUID never is.
+    """
+    if str(to).isdigit():
+        return {"to": to}
+    return {"recipient_type": "individual", "recipient": to}
+
+
 async def send_text(tenant: Tenant, to: str, body: str) -> None:
     url = f"https://graph.facebook.com/{settings.graph_api_version}/{tenant.phone_number_id}/messages"
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": body}}
+    payload = {"messaging_product": "whatsapp", **addressee(to), "type": "text", "text": {"body": body}}
     headers = {"Authorization": f"Bearer {tenant.access_token}"}
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(url, json=payload, headers=headers)
@@ -55,7 +67,7 @@ async def send_image(tenant: Tenant, to: str, media_id: str, caption: str | None
     img = {"id": media_id}
     if caption:
         img["caption"] = caption
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "image", "image": img}
+    payload = {"messaging_product": "whatsapp", **addressee(to), "type": "image", "image": img}
     headers = {"Authorization": f"Bearer {tenant.access_token}"}
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(url, json=payload, headers=headers)
@@ -68,7 +80,7 @@ async def send_document(tenant: Tenant, to: str, media_id: str, filename: str,
     doc = {"id": media_id, "filename": filename}
     if caption:
         doc["caption"] = caption
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "document", "document": doc}
+    payload = {"messaging_product": "whatsapp", **addressee(to), "type": "document", "document": doc}
     headers = {"Authorization": f"Bearer {tenant.access_token}"}
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(url, json=payload, headers=headers)
